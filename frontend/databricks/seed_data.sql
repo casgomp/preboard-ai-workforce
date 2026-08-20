@@ -53,7 +53,12 @@ INSERT OVERWRITE department_contacts VALUES
  'Office access and badges, parking and bike racks, desk assignments, building hours, conference room booking, office location, remote and home-office setup, workplace accommodations and logistics.'),
 ('People Operations','Julia Hartmann','people-operations@dayone.demo',
  array('background','benefit','compliance','contract','document','holiday','hr','onboarding','pay','payroll','policy','salary','tax','verification'),
- 'Offer letter and start-date questions, contract questions, first-day and general onboarding logistics, PTO policy, pay dates and payroll, tax forms, signing bonus payout and clawback terms, benefits enrollment, holiday policy, I-9 verification and background check status, confidentiality agreements and code of conduct questions.'),
+ -- I-9/background-check leads the sentence deliberately (not just topically first):
+ -- with it later in the sentence, "Is my background check finished?" scored higher
+ -- against Workplace IT (0.547) than People Operations (0.537) — a real embedding-
+ -- similarity tie broken by phrase position, verified live. Leading with it flipped
+ -- the ranking to People Operations (0.566 vs 0.547). NOTES.md §19/§17.
+ 'I-9 verification and background check status, offer letter and start-date questions, contract questions, first-day and general onboarding logistics, PTO policy, pay dates and payroll, tax forms, signing bonus payout and clawback terms, benefits enrollment, holiday policy, confidentiality agreements and code of conduct questions.'),
 ('Learning & Onboarding','Felix Weber','onboarding@dayone.demo',
  array('course','learn','orientation','training'),
  'Orientation schedule, required training courses, and learning resources for new hires.');

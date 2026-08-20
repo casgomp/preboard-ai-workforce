@@ -827,3 +827,37 @@ except where a real finding forced a deviation (noted).
   (`grounding.ts`) was deleted, not ported. `/api/documents/ask` now returns `501`
   for `scope="hr"` rather than silently misrouting an HR question through the
   employee-keyed Python flow (HR accounts have no `employeeId`).
+
+### Rebase conflict with a teammate's parallel branch (2026-08-20)
+
+A teammate (`sudosmus`) pushed 7 commits to `main` from the same point PR12
+branched from (`49c7caf`, right after the frontend was added) — polishing the
+*pre-merge* architecture: clarity passes on `jordan-rivera.md`/`alex-chen.md`,
+a richer `data/directory.md` (`abc0471`, 5 local departments with detailed
+coverage lists), base64-decoding hardening in `preboard/auth.py`, and prompt
+wording improvements in `preboard/generation.py`. None of that branch knew about
+`frontend/`'s existence or PR12's convergence — real parallel work, not a mistake,
+just built on a state this PR replaced.
+
+`git rebase dd902e8` (replaying PR12's single commit onto their 7) auto-merged the
+`auth.py`/`generation.py` changes cleanly (PR12 never touched those files) — kept
+as-is, genuine quality improvements. Real conflicts: `data/company.md` (content
+diverged — Austin/USD vs. Wolfsburg-Berlin-Munich/EUR) and `data/alex-chen.md`/
+`jordan-rivera.md`/`directory.md` (they polished these; PR12 deleted/replaced them
+with `data/E00N.md` and Unity Catalog `department_contacts`). Presented the
+tradeoff to the user rather than resolving unilaterally — discarding a teammate's
+commits' effective content, even superseded, warranted a check. **Decision: keep
+PR12's architecture** (already deployed and verified end-to-end) — reverting to
+local-directory routing would break the merge this PR exists to make. Their
+`abc0471` coverage detail was genuinely good, so it was folded into
+`seed_data.sql`'s `covers`/`routing_terms` rather than discarded outright.
+
+**Real finding from the fold-in**: adding "background check" to People
+Operations' `covers` text wasn't enough on its own — probed live, "Is my
+background check finished?" scored higher against Workplace IT (0.547) than
+People Operations (0.537), a genuine embedding-similarity tie that phrase
+*position* broke: moving "I-9 verification and background check status" to the
+front of the sentence (rather than the middle) flipped it to People Operations
+(0.566 vs 0.547). Consistent with §17's existing caveat that `covers` text is a
+live calibration, not a fire-and-forget field — re-probed after any wording
+change, not assumed.
