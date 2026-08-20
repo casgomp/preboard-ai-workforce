@@ -116,7 +116,7 @@ def _truncate(text: str) -> str:
     return text if len(text) <= _EXCERPT_LENGTH else text[:_EXCERPT_LENGTH].rsplit(" ", 1)[0] + "…"
 
 
-def _handoff_response(target, reason: str) -> GroundedAnswer:
+def _handoff_response(target) -> GroundedAnswer:
     return GroundedAnswer(
         status="NEEDS_HUMAN",
         answer=(
@@ -138,7 +138,7 @@ def ask(req: AskRequest) -> GroundedAnswer:
         result = qa.ask(req.employee_id, req.question, start_date=req.start_date, as_of=req.as_of)
     except Exception as exc:  # noqa: BLE001 — degrade to a handoff, never a 500 traceback (app.py's pattern)
         print(f"[server] error answering question for {req.employee_id!r}: {exc!r}")
-        return _handoff_response(handoff_target(req.employee_id), "error")
+        return _handoff_response(handoff_target(req.employee_id))
 
     if isinstance(result, Answer):
         return GroundedAnswer(
@@ -155,7 +155,7 @@ def ask(req: AskRequest) -> GroundedAnswer:
         )
 
     assert isinstance(result, Handoff)
-    return _handoff_response(result.target, result.reason)
+    return _handoff_response(result.target)
 
 
 @app.get("/health")

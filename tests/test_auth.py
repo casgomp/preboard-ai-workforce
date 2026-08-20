@@ -11,9 +11,15 @@ def test_roundtrip():
 
 
 def test_tampered_signature_rejected():
+    # A flip of the last base64url character only perturbs 2 significant bits
+    # of the underlying byte, so ~6% of flips decode to the same signature —
+    # not a tamper. Flip a middle character instead, where a full 6-bit swap
+    # changes the decoded byte(s) every time.
     token = issue_token("jordan-rivera")
     payload_b64, sig_b64 = token.split(".", 1)
-    tampered = f"{payload_b64}.{sig_b64[:-1]}{'A' if sig_b64[-1] != 'A' else 'B'}"
+    mid = len(sig_b64) // 2
+    tampered_char = "A" if sig_b64[mid] != "A" else "B"
+    tampered = f"{payload_b64}.{sig_b64[:mid]}{tampered_char}{sig_b64[mid + 1:]}"
 
     with pytest.raises(InvalidToken):
         verify_token(tampered)

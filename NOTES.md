@@ -84,23 +84,19 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   `data/directory.md` is deleted; `routing.UnityCatalogDirectorySource` reads
   `department_contacts` instead, so the glob concern this item used to name no
   longer applies (nothing named `directory.md` exists to glob).
-- **`DatabricksDataProvider` is still a stub** (PLAN_PR12's B6, cut) — every method
-  runs its SQL and then throws "Map your workspace result schema...". The HR
-  dashboard stays on `DATA_MODE=mock`; the candidate chat runs on real Databricks
-  independently of this (server.py doesn't use `DataProvider` at all). TRIGGER: the
-  HR dashboard needs to show real `employees`/`day_one_facts` data, not mock —
-  map `data_array` rows to `Employee`/`DayOneFact` and parameterize `updateFact`'s
-  SQL (it currently interpolates, the exact bug class NOTES.md §11 already paid for
-  once in Python).
+- **`DatabricksDataProvider` is still a stub**: TRIGGER FIRED, shipped in §21
+  (PR13 B4) — `data_array` rows map to `Employee`/`DayOneFact`/`FactEvent`
+  positionally, `updateFact` is parameterized.
 - **Misses dashboard**: TRIGGER FIRED, shipped in §20 — not a Databricks dashboard
   (PLAN_PR12's B7 as originally scoped, still not done), but an HR-facing
   "Knowledge gaps" panel in `frontend/`, ported from a teammate's parallel branch.
-- **Only E001 (Anna) and E002 (David) have offer packets** — `employees` in Unity
-  Catalog has five rows (E001-E005, PLAN_PR12 D2), but `document_chunks` only has
-  content for two of them plus the shared handbook; a question about Maria, Lukas,
-  or Sofia's laptop gets only the shared handbook, no employee-specific chunk.
-  TRIGGER: time remains; write `data/E003.md`-`E005.md` following `E001.md`'s
-  template (relative start-date phrasing, no hardcoded date — see §19).
+- **Only E001 (Anna) and E002 (David) have offer packets**: TRIGGER FIRED, shipped
+  in §21 (PR13 B3) — `data/E003.md`-`E005.md` added, following `E001.md`'s template.
+- **HR-scope document search** (PR13 D2) — the HR dashboard's "Test the grounded
+  answer" box was removed rather than wired to a second, HR-scoped retrieval path
+  against `company_documents` with `audience` filtering; `scope: "hr"` still 501s
+  at `/api/documents/ask`. TRIGGER: the pitch claims HR can query the document
+  library, or time remains after PR13's B5.
 
 ## §3 Shipped
 
@@ -202,6 +198,14 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   `server.py` → real embeddings/FM/Unity Catalog → grounded answer and a routed
   handoff, both through the actual Next.js dev server. See §19 and
   NOTES_ARCHIVE.md.
+- **PR13** (2026-08-20) – demo integrity pass (planned as PLAN_PR13): seeded
+  `question_misses` by driving the real stack instead of hand-inserting rows
+  (`preboard/seed_misses.py`); removed the HR dashboard's document-search box that
+  always 501'd; wrote the three missing offer packets (E003-E005); implemented
+  `DatabricksDataProvider` for real (result-row mapping + parameterized writes,
+  below PR13's own cut line but shipped anyway); fixed a flaky auth test and a
+  dead parameter in `server.py`. All ships shipped — nothing landed below the cut
+  line. See §21 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -899,3 +903,91 @@ feature the user asked for: an HR-facing "Knowledge gaps" panel.
   camelCase field names, verified via the real route's JSON response) and the
   component being an unmodified copy make this a low-risk gap, not skipped
   carelessly, but it's not the same as having looked at it.
+
+## §21 PR13: demo integrity pass
+
+PR12's merge worked end to end; PR13 (planned as PLAN_PR13) closed the three places
+where the running app showed a judge something empty, broken, or thinner than the
+screen beside it. All five blocks shipped — B4 was below the cut line and shipped
+anyway since B1/B2/B5 came in fast.
+
+- **B1 — `preboard/seed_misses.py`**: seeds `question_misses` by calling `QA.ask`
+  through the real `wiring.build_*` stack for a list of genuinely unanswerable
+  questions, rather than hand-inserting rows (which would hand-pick departments the
+  router never actually produced). Doubles as a smoke test — a clean run proves
+  embeddings, routing, and `UnityCatalogMissLog` all still work. First draft: 4 of
+  24 questions scored *above* the confidence threshold and got answered instead of
+  logged (real embeddings matching `company.md` content more broadly than expected
+  — "where can I park my bike" matched the "Where we work" section on the city name
+  alone). Swapped those 4 for questions verified below threshold before the real
+  seed run; cleared the table (`DELETE FROM question_misses`, confirmed with the
+  user first — a live write to a shared table) and reseeded clean: 24/24 missed,
+  spread across 4 departments (Workplace IT, Facilities, People Operations,
+  Learning & Onboarding). Verified through the real `GET /knowledge-gaps` endpoint,
+  not just the script's own output.
+- **B2 — removed the HR document-search box**: `DocumentManager.tsx` rendered
+  `<DocumentQuestionBox scope="hr" />` under "Test the grounded answer", but
+  `/api/documents/ask` 501s on `scope: "hr"` by design (D2/§19 — HR has no
+  `employee_id`, and wiring a second HR-scoped retrieval path against
+  `company_documents` was out of scope for PR12). Deleted the box and its caption;
+  dropped the now-single-use `scope` prop from `DocumentQuestionBox` entirely
+  (always `"candidate"` now) rather than leaving a prop that only ever takes one
+  value. The upload and indexed-documents panels are untouched. Route's `501`
+  branch left in place — still correct for a stray direct API call.
+- **B3 — `data/E003.md`-`E005.md`**: Maria Rossi (Munich, Jonas Bauer, 10-day
+  equipment lead time), Lukas Schmidt (Wolfsburg, Lea König, 3-day lead time —
+  deliberately shorter, "this role's start date was confirmed later"), Sofia
+  Garcia (Berlin, David Neumann, 2-week lead time) — same seven-section template
+  as `E001.md`, manager/city cross-checked against `seed_data.sql` line by line.
+  Re-ingested (`make ingest`, 48 chunks total); verified live that a laptop
+  question for each of E003/E004/E005 cites that employee's own document, and that
+  the three different lead times actually come back different in the generated
+  answer text.
+- **B4 — `DatabricksDataProvider`**: mapped `result.data_array` rows positionally
+  to `Employee`/`DayOneFact`/`FactEvent` — column order confirmed live against the
+  workspace (`SELECT * FROM employees`/`day_one_facts`, matches
+  `setup_tables.sql`'s `CREATE TABLE` column lists exactly, not assumed). Replaced
+  every interpolated value in `updateFact` with a `parameters` array
+  (`:name`/`StatementParameterListItem`-shaped `{name, value, type}` on the REST
+  body) — the exact bug class §11 already paid for once in Python (Spark SQL
+  silently drops `''`-doubled quotes rather than erroring). Verified end-to-end
+  through the real Next.js dev server with `DATA_MODE=databricks`: HR login →
+  `GET /api/demo` → all 5 employees read from Unity Catalog; `POST /api/demo`
+  `simulate-delay` → `UPDATE` fired, `laptop_status` flipped `READY` → `DELAYED`
+  with `previousValue` set correctly, then manually reverted so the workspace
+  wasn't left in a demo-dirtied state. `DATA_MODE` defaults back to `mock` in
+  `frontend/.env` for demo reliability — flipping it to `databricks` is a
+  presenter's choice, not the new default, so a network hiccup mid-pitch can't
+  take down the HR view.
+- **B6 — flaky test + dead parameter**: `test_tampered_signature_rejected` flipped
+  the *last* character of the base64url signature, but only 2 of that character's
+  6 bits are significant — measured 0/200 tamper-detection failures with a
+  last-character flip in a naive check, matching PR13's own measured "~6% of
+  flips decode identically" — not a reliable tamper. Flipped a *middle* character
+  instead (full 6-bit swap every time); verified 0/200 failures over 200 runs, not
+  just the required 20. `server.py`'s `_handoff_response(target, reason)` never
+  read `reason` — dropped the parameter from the function and both call sites
+  rather than threading it into `GroundedAnswer` for no consumer.
+- **D5 (`make test`) needed no fix**: the plan described `npx vitest` dying with
+  `MODULE_NOT_FOUND` inside `rolldown`'s native binding. Didn't reproduce —
+  `npm test`/`make test` both ran clean (10 tests passed) on this machine's
+  current `node_modules` state. Left as-is rather than "fixing" a problem that
+  wasn't there; if it resurfaces for a teammate, it's almost certainly a
+  platform-specific optional-dependency mismatch (`rm -rf node_modules
+  package-lock.json && npm install` is the known fix for that class of bug), not
+  a code change.
+- **B5 — demo walkthrough, written down**: `DEMO_SCRIPT.md` (repo root) — login as
+  Anna → grounded laptop question (also the first taste of T-minus urgency, since
+  her real start date is 5 days out) → a routed handoff ("is there a gym in the
+  building?" → Facilities, via `department_contacts`' `covers` text, not a
+  hardcoded map) → the countdown comparison (`as_of` override, dev-only by design,
+  shown as a terminal aside: the same question 90 days out reads as reassuring,
+  2 days out flips to "likely overdue, contact now") → HR view (all 5 employees,
+  each citing their own packet) → Knowledge gaps panel (pre-seeded by B1, 4
+  departments). Every step actually ran against the real workspace while writing
+  the script, not drafted from memory. Along the way, found the user's own long-
+  running `make dev` uvicorn (started before this session's edits) had stopped
+  responding to `/health` — likely `--reload` didn't survive the volume of file
+  changes cleanly. Didn't touch their terminal's process; verified everything
+  through a scratch port instead and flagged the restart in the demo script's
+  pre-flight checklist.
