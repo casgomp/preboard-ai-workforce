@@ -16,6 +16,7 @@ class HandoffTarget:
 
 _STUB_TARGETS = {
     "jordan-rivera": HandoffTarget(name="Priya Nandakumar", contact="priya.n@example.com"),
+    "alex-chen": HandoffTarget(name="Devon Ortiz", contact="devon.o@example.com"),
 }
 
 _DEFAULT_TARGET = HandoffTarget(name="People Ops", contact="people-ops@example.com")

@@ -44,7 +44,10 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
 
 ## §3 Shipped
 
-Nothing merged yet.
+- **PR1a** (2026-08-20, `63145d3`) – vertical slice proving ask → grounded answer with
+  citation → low-confidence handoff → miss logged, entirely local (keyword-overlap
+  retrieval, stub generator, SQLite miss log, CLI front end). No Databricks connection
+  required to run or test it. See NOTES_ARCHIVE.md for the design record.
 
 ## §4 Release order
 
@@ -54,9 +57,10 @@ Nothing merged yet.
    local SQLite (same shape as the eventual UC table), CLI front end (Databricks App
    deferred out of the critical path). Proves ask → grounded answer with citation →
    low-confidence handoff → miss logged end to end without any Databricks credentials.
-2. PR1b – swap in Unity Catalog + vector search retrieval, real per-offer auth, and the
-   Databricks App UI.
-3. PR2 – gap report.
+2. PR1b – real per-offer auth (stateless signed magic-link tokens) and a second
+   candidate in the corpus, so auth scoping is actually demonstrable.
+3. PR1c – swap in Unity Catalog + vector search retrieval and the Databricks App UI.
+4. PR2 – gap report.
 
 First slice cut line: if the loop in PR1a isn't demoable by end of day 1, PR1b's real
 retrieval/auth and PR2 are both dropped from the pitch and named as future work instead.
@@ -71,9 +75,17 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   network) and a `DatabricksFMGenerator` (guarded import of `databricks-sdk`, only
   needed once someone runs against a real endpoint). Nothing in `qa.py` depends on
   which one is wired in.
-- **Auth**: stubbed to a single hardcoded offer id for PR1a. Real per-offer auth
-  (invariant §1.5) is PR1b work – not implemented yet, not silently skipped in the
-  pitch.
-- **Retrieval scoping**: even with one hardcoded offer, `retrieve()` takes an
-  `offer_id` and only searches that offer's corpus – so swapping in real auth later
-  doesn't require touching the retrieval boundary.
+- **Retrieval scoping**: `retrieve()` takes an `offer_id` and only searches that
+  offer's corpus – so swapping in real auth later doesn't require touching the
+  retrieval boundary.
+
+## §6 PR1b decisions
+
+- **Auth mechanism**: stateless signed magic-link tokens (HMAC-SHA256 over
+  `offer_id:expiry`, base64url-encoded), not a login form or session store. Verifying a
+  token needs only the shared secret, no directory lookup – matches invariant §1.5 (no
+  internal identity pre-day-1) directly instead of building a login system that implies
+  one. Secret comes from `PREBOARD_AUTH_SECRET`; falls back to a dev-only constant
+  (`auth.py`) so the loop runs without any secret configured. **Must** be set via a
+  Databricks secret scope before any real deployment – the fallback is not safe to ship.
+- Token TTL defaults to 14 days (offer-to-start-date window), overridable per call.

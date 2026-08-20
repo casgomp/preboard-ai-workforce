@@ -26,3 +26,15 @@ def test_unknown_offer_returns_nothing():
     results = retriever.retrieve("nonexistent-offer", "When do I start?")
 
     assert results == []
+
+
+def test_candidates_only_retrieve_their_own_corpus():
+    retriever = KeywordRetriever(CORPUS_DIR)
+
+    jordan_results = retriever.retrieve("jordan-rivera", "Is this role remote or in office?")
+    alex_results = retriever.retrieve("alex-chen", "Is this role remote or in office?")
+
+    assert jordan_results[0].chunk.doc_id == "jordan-rivera"
+    assert "Austin office" in jordan_results[0].chunk.text
+    assert alex_results[0].chunk.doc_id == "alex-chen"
+    assert "fully remote" in alex_results[0].chunk.text
