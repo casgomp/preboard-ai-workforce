@@ -1,20 +1,20 @@
 """Corpus retrieval.
 
 `KeywordRetriever` here is the PR1a stand-in for real semantic retrieval (NOTES.md
-§5): chunks are loaded from a local directory per offer and scored by token overlap
-with the question. `EmbeddingRetriever` (embedding_retrieval.py) replaces the scoring
-with real cosine similarity over a Databricks embeddings endpoint but shares the same
-`Retriever` protocol, so callers don't care which is wired in. The `offer_id` scoping
-stays in the interface either way, so swapping doesn't touch callers.
+§5): chunks come from a `ChunkSource` (corpus.py — local markdown or Unity Catalog)
+and are scored by token overlap with the question. `EmbeddingRetriever`
+(embedding_retrieval.py) replaces the scoring with real cosine similarity over a
+Databricks embeddings endpoint but shares the same `Retriever` protocol and the same
+`ChunkSource` abstraction, so callers don't care which retriever or which chunk
+storage backend is wired in.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol
 
-from preboard.corpus import Chunk, load_chunks
+from preboard.corpus import Chunk, ChunkSource
 
 # Tuned by hand against data/*.md. This is a placeholder that happens to separate the
 # sample corpus's in-scope and out-of-scope questions for KeywordRetriever — token
@@ -52,14 +52,14 @@ class Retriever(Protocol):
 
 
 class KeywordRetriever:
-    """Loads `<corpus_dir>/<offer_id>.md` and scores sections by token overlap."""
+    """Loads chunks from a `ChunkSource` and scores sections by token overlap."""
 
-    def __init__(self, corpus_dir: Path):
-        self._corpus_dir = corpus_dir
+    def __init__(self, source: ChunkSource):
+        self._source = source
 
     def retrieve(self, offer_id: str, question: str) -> list[RetrievedChunk]:
-        doc_path = self._corpus_dir / f"{offer_id}.md"
-        if not doc_path.exists():
+        chunks = self._source.load(offer_id)
+        if not chunks:
             return []
 
         q_tokens = _tokenize(question)
@@ -67,7 +67,7 @@ class KeywordRetriever:
             return []
 
         results = []
-        for chunk in load_chunks(doc_path):
+        for chunk in chunks:
             c_tokens = _tokenize(chunk.text) | _tokenize(chunk.section)
             if not c_tokens:
                 continue

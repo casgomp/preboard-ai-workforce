@@ -45,9 +45,10 @@ UNGROUNDED_CASES = [
 
 @pytest.fixture
 def retriever():
+    from preboard.corpus import LocalMarkdownSource
     from preboard.embedding_retrieval import EmbeddingRetriever
 
-    return EmbeddingRetriever(CORPUS_DIR)
+    return EmbeddingRetriever(LocalMarkdownSource(CORPUS_DIR))
 
 
 @pytest.mark.parametrize("offer_id,question", GROUNDED_CASES)
@@ -92,3 +93,31 @@ def test_generator_grounds_its_answer_in_the_chunk():
 
     assert answer.strip()
     assert "second paycheck" in answer.lower() or "second pay" in answer.lower()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("DATABRICKS_WAREHOUSE_ID"), reason="DATABRICKS_WAREHOUSE_ID not configured"
+)
+class TestUnityCatalogSource:
+    """Requires `preboard.uc_corpus` to have been ingested already (NOTES.md §9) —
+    this tests reading, not re-ingesting on every run."""
+
+    def test_reads_the_same_chunks_as_the_local_files(self):
+        from preboard.corpus import LocalMarkdownSource
+        from preboard.uc_corpus import UnityCatalogSource
+
+        uc_source = UnityCatalogSource(os.environ["DATABRICKS_WAREHOUSE_ID"])
+        local_source = LocalMarkdownSource(CORPUS_DIR)
+
+        for offer_id in ("jordan-rivera", "alex-chen"):
+            uc_chunks = uc_source.load(offer_id)
+            local_chunks = local_source.load(offer_id)
+            assert [(c.doc_id, c.section, c.text) for c in uc_chunks] == [
+                (c.doc_id, c.section, c.text) for c in local_chunks
+            ]
+
+    def test_unknown_offer_returns_nothing(self):
+        from preboard.uc_corpus import UnityCatalogSource
+
+        source = UnityCatalogSource(os.environ["DATABRICKS_WAREHOUSE_ID"])
+        assert source.load("nonexistent-offer") == []

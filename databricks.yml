@@ -41,6 +41,15 @@ resources:
           serving_endpoint:
             name: 'databricks-gte-large-en'
             permission: 'CAN_QUERY'
+        - name: 'sql_warehouse'
+          sql_warehouse:
+            id: '43f29df3c2e0da1d'
+            permission: 'CAN_USE'
+        - name: 'offer_chunks_table'
+          uc_securable:
+            securable_full_name: 'workspace.preboard.offer_chunks'
+            securable_type: 'TABLE'
+            permission: 'SELECT'
 
 targets:
   dev:

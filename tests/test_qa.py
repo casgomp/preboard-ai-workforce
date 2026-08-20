@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from preboard.corpus import LocalMarkdownSource
 from preboard.generation import StubGenerator
 from preboard.qa import QA, Answer, Handoff
 from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever
@@ -14,7 +15,7 @@ OFFER_ID = "jordan-rivera"
 @pytest.fixture
 def qa(tmp_path):
     return QA(
-        retriever=KeywordRetriever(CORPUS_DIR),
+        retriever=KeywordRetriever(LocalMarkdownSource(CORPUS_DIR)),
         generator=StubGenerator(),
         miss_log=MissLog(tmp_path / "misses.db"),
         confidence_threshold=CONFIDENCE_THRESHOLD,

@@ -12,9 +12,8 @@ rest of the app runs without `databricks-sdk` installed or credentials configure
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
-from preboard.corpus import Chunk, load_chunks
+from preboard.corpus import Chunk, ChunkSource
 from preboard.retrieval import RetrievedChunk
 
 # Empirically tested against data/*.md with 11 probe questions (6 grounded, 5 not) —
@@ -39,14 +38,15 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 class EmbeddingRetriever:
-    def __init__(self, corpus_dir: Path, endpoint_name: str = DEFAULT_ENDPOINT):
+    def __init__(self, source: ChunkSource, endpoint_name: str = DEFAULT_ENDPOINT):
         from databricks.sdk import WorkspaceClient  # noqa: PLC0415
 
-        self._corpus_dir = corpus_dir
+        self._source = source
         self._endpoint_name = endpoint_name
         self._client = WorkspaceClient()
-        # Chunk embeddings only change if the corpus file changes, and this app's
-        # corpus is static per run — compute once per offer, not once per question.
+        # Chunk embeddings only change if the corpus changes, and this app's corpus is
+        # static per run — compute once per offer, not once per question. Also spares
+        # a Unity Catalog query (when UnityCatalogSource is wired in) per question.
         self._chunks_by_offer: dict[str, list[Chunk]] = {}
         self._embeddings_by_offer: dict[str, list[list[float]]] = {}
 
@@ -57,12 +57,7 @@ class EmbeddingRetriever:
     def _load_offer(self, offer_id: str) -> None:
         if offer_id in self._chunks_by_offer:
             return
-        doc_path = self._corpus_dir / f"{offer_id}.md"
-        if not doc_path.exists():
-            self._chunks_by_offer[offer_id] = []
-            self._embeddings_by_offer[offer_id] = []
-            return
-        chunks = load_chunks(doc_path)
+        chunks = self._source.load(offer_id)
         self._chunks_by_offer[offer_id] = chunks
         self._embeddings_by_offer[offer_id] = self._embed([c.text for c in chunks]) if chunks else []
 

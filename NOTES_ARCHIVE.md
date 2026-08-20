@@ -114,3 +114,51 @@ real embeddings.
 not Unity Catalog (§2) — fine at this scale, revisit if it grows. Gap-report semantic
 clustering (§2) could now use these same embeddings but doesn't yet — unclaimed
 follow-up.
+
+## Deploy — real Databricks App (2026-08-20)
+
+**Why:** Everything up to PR1d ran and was verified locally against real endpoints;
+deploying was the last step to make the whole pitch live rather than "runs on my
+machine."
+
+**Design:** An Asset Bundle (`databricks.yml`) declares the app, the auth secret as a
+real Databricks secret, and `CAN_QUERY` permission on both serving endpoints in one
+file — `databricks bundle deploy && databricks bundle run preboard` reproduces the
+whole setup, not just a code push.
+
+**Gotchas resolved:** the bundle's `resources.apps.*.config` block (command, env)
+looked like it should configure the app but didn't take effect — the deployed app ran
+`python app.py` instead of `streamlit run app.py` and crashed immediately. A literal
+`app.yaml` at the repo root, which Databricks Apps actually reads, fixed it.
+
+**Finding, not a bug:** Databricks Apps mandates SSO for every visitor — confirmed in
+docs, not configurable. Conflicts with invariant §1.5 read as "no login screen exists."
+Team decision: keep it as a Databricks App, adjust the pitch to "the magic-link token
+scopes access to one offer" rather than "no login required," and note that a demo run
+from an already-authenticated browser looks seamless but isn't representative of a
+cold visitor's experience.
+
+## PR3 — corpus in Unity Catalog (2026-08-20)
+
+**Why:** The stack line has said "corpus in Unity Catalog" since before any code
+existed; PR1d used real FM and embeddings endpoints but still read the corpus from
+local markdown files, leaving that specific claim unbacked.
+
+**Design:** `ChunkSource` protocol (`corpus.py`) with `LocalMarkdownSource` and
+`UnityCatalogSource` (`uc_corpus.py`) — both retrievers take a source instead of a raw
+path, so neither knows or cares which backend it's reading from. Table:
+`workspace.preboard.offer_chunks`, queried via the workspace's serverless SQL
+warehouse. `wiring.py` picks UC when `DATABRICKS_WAREHOUSE_ID` is configured (on top
+of the existing credentials check), local markdown otherwise — same graceful-fallback
+shape as the retriever/generator choice in PR1d.
+
+**Gotchas resolved:** the ingestion script's first version built one large
+hand-escaped `INSERT ... VALUES` statement, doubling embedded quotes (`''`) per ANSI
+SQL convention. Spark SQL doesn't honor that inside a string literal — it silently
+strips the sequence instead of erroring, so `"hasn't"` round-tripped as `"hasnt"` with
+no exception anywhere. Caught only because the integration test compared UC-read
+chunks against the local files character-for-character rather than just checking
+"some text came back." Fixed by switching to parameterized inserts, which removes the
+escaping question entirely rather than fixing the escape character — the same lesson
+as PR1d's `ChatMessage` bug: real network/SQL calls surface failure modes local stubs
+structurally cannot.

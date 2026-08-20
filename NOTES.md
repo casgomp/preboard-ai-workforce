@@ -6,8 +6,9 @@ offer packet and preboarding docs, hands off to HR when it can't, logs what it m
 Stack: Python, Databricks Free Edition (serverless-only). Generation via a Foundation
 Model endpoint (real, PR1d), retrieval via a Databricks embeddings endpoint with
 cosine similarity computed in-process (real, PR1d — not a Unity Catalog Vector Search
-index; see §9), chat UI as a Databricks App (Streamlit, PR1c), miss log as local SQLite
-(stand-in for a UC SQL table).
+index; see §9), corpus in a Unity Catalog Delta table (real, PR3 — see §11), chat UI
+as a Databricks App (Streamlit, PR1c), miss log as local SQLite (stand-in for a UC SQL
+table).
 
 Team of 4, 48-hour hackathon build. Claude writes implementation directly this project
 (no local pairing/scaffolding needed) – speed over teaching.
@@ -50,12 +51,11 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   differently-phrased versions of the same missed question count as separate rows.
   TRIGGER FIRED: PR1d added real embeddings. Not yet used for gap-report clustering —
   unclaimed follow-up, not done in PR1d.
-- **Corpus lives in local markdown files, not Unity Catalog** – `EmbeddingRetriever`
-  (PR1d) reads `data/*.md` directly; embeddings are computed live per question/offer,
-  nothing is persisted in UC. Fine at this corpus size (embeds fast, no caching needed)
-  but doesn't match the original "corpus in Unity Catalog" stack claim. TRIGGER: the
-  corpus grows enough that per-question embedding latency or cost matters, or the pitch
-  needs to show data actually living in UC.
+- **Chunk embeddings still computed live, not persisted** – `UnityCatalogSource` (PR3)
+  holds raw chunk text in UC; `EmbeddingRetriever` still calls the embeddings endpoint
+  per question rather than reading precomputed vectors from the table. Fine at this
+  corpus size. TRIGGER: the corpus grows enough that per-question embedding
+  latency/cost matters — store embeddings as a column and only recompute on ingest.
 
 ## §3 Shipped
 
@@ -86,6 +86,13 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   Apps mandates SSO for every visitor — no public/anonymous access exists — which
   conflicts with the "no login screen" reading of invariant §1.5. Pitch adjusted, not
   the architecture: see §1.5 and §10.
+- **PR3** (2026-08-20) – corpus moved into Unity Catalog (`workspace.preboard
+  .offer_chunks`, a real Delta table, not a stand-in). `ChunkSource` abstraction
+  (`corpus.py`) lets both retrievers read from either UC or local markdown; deployed
+  app now uses UC when `DATABRICKS_WAREHOUSE_ID` is configured. Found and fixed a real
+  SQL bug: hand-escaped string literals silently dropped apostrophes (Spark SQL
+  ignores `''` doubling, unlike ANSI SQL) — switched to parameterized inserts, which
+  removes the bug class rather than patching the escaping. See NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -235,3 +242,39 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   with `databricks bundle deploy && databricks bundle run preboard` from the repo root
   (needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` in the shell env, e.g. `set -a; source
   .env; set +a`). Logs: `databricks apps logs preboard --tail-lines 100`.
+
+## §11 PR3 decisions
+
+- **`ChunkSource` protocol** (`corpus.py`): `LocalMarkdownSource` and
+  `UnityCatalogSource` (`uc_corpus.py`) both return `list[Chunk]` for an offer id.
+  `KeywordRetriever` and `EmbeddingRetriever` take a `ChunkSource` instead of a raw
+  `corpus_dir` — neither retriever knows or cares which backend it's reading from,
+  matching the existing pattern of swappable boundaries (`Retriever`, `Generator`).
+- **Table**: `workspace.preboard.offer_chunks` (offer_id, doc_id, section, text,
+  chunk_order), in the default `workspace` catalog Free Edition provisions — no new
+  catalog created. Queried through the workspace's serverless SQL warehouse
+  (`DATABRICKS_WAREHOUSE_ID` — id `43f29df3c2e0da1d` in this workspace) via
+  `WorkspaceClient().statement_execution`, not the `databricks-sql-connector` package
+  (one fewer dependency; adequate for a handful of parameterized statements).
+  `EmbeddingRetriever` still caches chunks per offer per process, so a UC-backed
+  retriever incurs at most one warehouse round trip per offer per run, not one per
+  question.
+- **Ingestion**: `python -m preboard.uc_corpus --warehouse-id <id>` reads every
+  `data/*.md`, deletes and reinserts the table's rows — idempotent, safe to re-run
+  after editing a local offer packet. Not run automatically; someone re-ingests by
+  hand when the corpus changes. `ensure_schema_and_table` creates the schema/table if
+  missing, so a fresh workspace only needs the one command.
+- **Real bug: hand-escaped SQL silently corrupted data, not an error** — the first
+  version built one large `INSERT ... VALUES (...), (...), ...` statement, escaping
+  embedded quotes with SQL-standard `''` doubling. Spark SQL doesn't honor that inside
+  a single-quoted string literal; it strips the sequence rather than erroring, so
+  `"hasn't"` silently round-tripped as `"hasnt"` — verified directly with a throwaway
+  test table (`'hasn''t'` → `'hasnt'`; `'hasn\'t'` → `"hasn't"`, confirming Spark SQL
+  wants `\'`, not the ANSI-standard doubling). No exception, no failed test until
+  `tests/test_databricks_integration.py::TestUnityCatalogSource` compared UC-read
+  chunks against the local files character-for-character. Fixed by switching to
+  parameterized inserts (`StatementParameterListItem`, one row at a time) instead of
+  hand-rolling escaped SQL — removes the bug class rather than fixing the escape
+  character, and matches how `UnityCatalogSource.load()` already queried safely.
+  **Lesson for future SQL string-building against this workspace: prefer parameters,
+  don't assume ANSI-SQL escaping rules hold.**

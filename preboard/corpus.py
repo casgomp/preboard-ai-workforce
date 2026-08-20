@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,23 @@ class Chunk:
     doc_id: str
     section: str
     text: str
+
+
+class ChunkSource(Protocol):
+    def load(self, offer_id: str) -> list[Chunk]: ...
+
+
+class LocalMarkdownSource:
+    """Reads `<corpus_dir>/<offer_id>.md`, one chunk per `## ` section."""
+
+    def __init__(self, corpus_dir: Path):
+        self._corpus_dir = corpus_dir
+
+    def load(self, offer_id: str) -> list[Chunk]:
+        doc_path = self._corpus_dir / f"{offer_id}.md"
+        if not doc_path.exists():
+            return []
+        return load_chunks(doc_path)
 
 
 def load_chunks(doc_path: Path) -> list[Chunk]:
