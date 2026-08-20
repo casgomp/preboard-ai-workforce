@@ -1,2 +1,3 @@
 pytest
-# databricks-sdk  # only needed for preboard.generation.DatabricksFMGenerator (PR1b)
+streamlit
+# databricks-sdk  # only needed for preboard.generation.DatabricksFMGenerator (PR1d)

@@ -48,6 +48,12 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   citation → low-confidence handoff → miss logged, entirely local (keyword-overlap
   retrieval, stub generator, SQLite miss log, CLI front end). No Databricks connection
   required to run or test it. See NOTES_ARCHIVE.md for the design record.
+- **PR1b** (2026-08-20, `2f82cc7`) – real per-offer auth via signed magic-link tokens;
+  second candidate added so scoping is demonstrable. See NOTES_ARCHIVE.md.
+- **PR1c** – Streamlit chat UI, verified against a live local server in a real browser
+  (not just unit tests): grounded answer with citation, low-confidence handoff, and
+  invalid-token rejection all confirmed rendering correctly. Caught and fixed a real
+  concurrency bug in the process — see NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -59,8 +65,12 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
    low-confidence handoff → miss logged end to end without any Databricks credentials.
 2. PR1b – real per-offer auth (stateless signed magic-link tokens) and a second
    candidate in the corpus, so auth scoping is actually demonstrable.
-3. PR1c – swap in Unity Catalog + vector search retrieval and the Databricks App UI.
-4. PR2 – gap report.
+3. PR1c – Streamlit chat UI (Databricks Apps-native), reusing the same QA/auth stack
+   as the CLI. Runs locally now; becomes a real Databricks App at deploy time with no
+   code change.
+4. PR1d – swap in real Unity Catalog + vector search retrieval. Blocked on workspace
+   credentials.
+5. PR2 – gap report.
 
 First slice cut line: if the loop in PR1a isn't demoable by end of day 1, PR1b's real
 retrieval/auth and PR2 are both dropped from the pitch and named as future work instead.
@@ -89,3 +99,21 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   (`auth.py`) so the loop runs without any secret configured. **Must** be set via a
   Databricks secret scope before any real deployment – the fallback is not safe to ship.
 - Token TTL defaults to 14 days (offer-to-start-date window), overridable per call.
+
+## §7 PR1c decisions
+
+- **App framework**: Streamlit — resolves the "undecided" note in the stack line.
+  Databricks Apps supports it natively, so `app.py` runs unmodified locally
+  (`streamlit run app.py`) and once deployed; no separate dev/deploy version.
+- **Auth in the UI**: `?token=` query param only, no login form — same magic-link
+  token as the CLI, read via `st.query_params`.
+- **Gotcha**: `st.cache_resource` caches the `QA`/`MissLog` instance across Streamlit
+  reruns, and reruns can land on a different thread than the one that created it.
+  `sqlite3.connect()` defaults to `check_same_thread=True`, so the second chat message
+  crashed with `sqlite3.ProgrammingError` — invisible to both the CLI (single-threaded)
+  and pytest (fresh connection per test), only caught by driving the running app in an
+  actual browser. Fixed in `store.py` with `check_same_thread=False` plus a
+  `threading.Lock`; regression test in `tests/test_store.py` logs from a spawned
+  thread. Also note for future Streamlit hot-reload: editing a module *other than*
+  `app.py` doesn't always bust `st.cache_resource` — restart the process, don't trust
+  the auto-reload, when a fix doesn't seem to take.
