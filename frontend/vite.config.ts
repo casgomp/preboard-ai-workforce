@@ -1,28 +1,12 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
 
-const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
-  "00000000-0000-4000-8000-000000000000";
-
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  d1_databases: [
-    {
-      binding: "DB",
-      database_name: "day-one-local-db",
-      database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
-    },
-  ],
-  r2_buckets: [
-    {
-      binding: "DOCS",
-      bucket_name: "day-one-local-documents",
-    },
-  ],
 };
 
 export default defineConfig(async () => {

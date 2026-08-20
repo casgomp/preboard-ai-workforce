@@ -4,8 +4,6 @@ import handler from "vinext/server/app-router-entry";
 
 interface Env {
   ASSETS: Fetcher;
-  DB: D1Database;
-  DOCS: R2Bucket;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -18,9 +16,6 @@ interface Env {
 interface Fetcher {
   fetch(input: Request): Promise<Response>;
 }
-
-type D1Database = object;
-type R2Bucket = object;
 
 interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;

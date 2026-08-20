@@ -2,3 +2,8 @@ pytest
 streamlit
 python-dotenv
 databricks-sdk
+fastapi
+uvicorn[standard]
+python-multipart
+pypdf
+httpx
