@@ -36,3 +36,23 @@ contact you directly if anything is needed.
 ## PTO accrual
 PTO accrues from day one and appears in Workday once your account is provisioned,
 typically by your second week.
+
+## First-week expectations
+
+During your first week, you will meet your manager and engineering pod, complete required security and onboarding training, receive access to company systems, and review your initial responsibilities with your manager.
+
+## Office logistics
+
+The Austin office is located at 2400 Riverside Commons, Suite 400. The office is open Monday–Friday, 7 AM–8 PM, and badge access is required. Contact facilities@example.com for questions about parking, building access, desk assignments, or workplace logistics.
+
+## Payroll
+
+For questions about pay dates, direct deposit, tax forms, or your signing bonus, contact payroll@example.com.
+
+## First paycheck
+
+Your signing bonus is paid with your second paycheck rather than your first paycheck.
+
+## PTO
+
+PTO begins accruing on your first day and becomes visible in Workday once your account is provisioned, typically during your second week.
