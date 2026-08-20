@@ -6,6 +6,14 @@ and check in at the front desk; ask for Priya Nandakumar in People Ops, who will
 you to orientation. Bring a government-issued photo ID for I-9 verification — the
 offer cannot be finalized without it.
 
+## Before your first day checklist
+Bring a government-issued photo ID for I-9 verification. No action is needed on your
+background check unless HR contacts you directly — it's already in progress. Watch
+for your laptop; it should arrive about a week before your start date, and if it
+hasn't by the Wednesday before, contact it-onboarding@example.com. There's nothing to
+complete for benefits or the 401(k) before day one — enrollment opens on your start
+date, not before.
+
 ## Equipment
 IT ships your laptop (a MacBook Pro 14") to your home address about one week before
 your start date. If it hasn't arrived by the Wednesday before you start, contact

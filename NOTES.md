@@ -331,3 +331,31 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   use PAT auth, which structurally cannot catch an OAuth-path-only bug. If a future
   change depends on distinguishing "local dev" from "deployed app," don't trust local
   testing to validate it — check `databricks apps logs` after deploying, every time.
+
+## §13 Broad-question threshold tradeoff (accepted, not fixed)
+
+- **Finding**: "What do I need to do before I start?" is a genuinely broad question —
+  its answer is spread across several sections, so no single chunk's cosine similarity
+  to it scores high, even after adding a purpose-written "Before your first day
+  checklist" section to both offer packets (`jordan-rivera.md`, `alex-chen.md`). That
+  section correctly became the top-ranked chunk (was "Equipment" before), but only
+  reached 0.581/0.526 — still under `EMBEDDING_CONFIDENCE_THRESHOLD = 0.62`.
+- **Why the threshold wasn't just lowered**: a fuller probe showed the grounded and
+  ungrounded score ranges now genuinely overlap. "Can I negotiate a higher salary
+  before I start?" — ungrounded, the corpus has nothing about negotiation — scores
+  0.602, *higher* than either broad "before I start" question. No single threshold
+  separates both correctly; lowering it to let the broad question through would also
+  let that ungrounded question through and produce a confidently wrong answer instead
+  of a handoff, which is the worse failure per invariant §1.4.
+- **Decision (2026-08-20, team call)**: keep `EMBEDDING_CONFIDENCE_THRESHOLD = 0.62`.
+  Broad multi-topic questions will sometimes hand off to HR even when the corpus
+  technically contains the answer, in favor of never confidently answering an
+  unanswerable one. Framed as a deliberate safety property for the pitch ("the bot
+  would rather escalate than guess"), not a known bug. The "Before your first day
+  checklist" sections stay — they're still a real ranking improvement and would help
+  further if the threshold or embedding model changes.
+- **Structural limitation, not a tuning problem**: single-chunk cosine similarity has
+  a ceiling on how well it can serve broad/aggregate questions by design — the whole
+  approach retrieves and grounds on one topical unit at a time. A future fix (not
+  attempted here) would need query decomposition or multi-pass retrieval, not just a
+  different threshold or more corpus content.

@@ -5,6 +5,15 @@ Your start date is Monday, October 5, 2026. This role is fully remote — there 
 office check-in. Your manager, Devon Ortiz, will send a video call link the morning of
 your first day.
 
+## Before your first day checklist
+No action is needed on your background check unless HR contacts you directly — it's
+already in progress. Watch for your laptop and home-office stipend card, which should
+arrive about ten days before your start date; contact it-onboarding@example.com if
+nothing has shown up three business days before you start. There's nothing to
+complete for benefits or the 401(k) before day one. Since this role is remote, there's
+no office check-in — just wait for the video call link from your manager on the
+morning of your first day.
+
 ## Equipment
 IT ships a laptop and a home-office stipend card to your mailing address about ten days
 before your start date. If nothing has arrived three business days before you start,
