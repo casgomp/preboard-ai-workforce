@@ -1,0 +1,8 @@
+command: ['streamlit', 'run', 'app.py']
+env:
+  - name: 'STREAMLIT_GATHER_USAGE_STATS'
+    value: 'false'
+  - name: 'DATABRICKS_FM_ENDPOINT'
+    value: 'databricks-meta-llama-3-3-70b-instruct'
+  - name: 'PREBOARD_AUTH_SECRET'
+    valueFrom: 'auth_secret'

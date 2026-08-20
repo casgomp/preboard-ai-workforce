@@ -1,0 +1,48 @@
+bundle:
+  name: preboard
+
+sync:
+  exclude:
+    - .git
+    - .env
+    - .env.example
+    - vars
+    - misses.db
+    - '__pycache__'
+    - '.pytest_cache'
+    - '*.pyc'
+
+resources:
+  apps:
+    preboard:
+      name: 'preboard'
+      source_code_path: .
+      description: 'Preboarding Q&A buffer for signed-but-not-started hires'
+      config:
+        command: ['streamlit', 'run', 'app.py']
+        env:
+          - name: 'STREAMLIT_GATHER_USAGE_STATS'
+            value: 'false'
+          - name: 'DATABRICKS_FM_ENDPOINT'
+            value: 'databricks-meta-llama-3-3-70b-instruct'
+          - name: 'PREBOARD_AUTH_SECRET'
+            value_from: 'auth_secret'
+      resources:
+        - name: 'auth_secret'
+          secret:
+            scope: 'preboard'
+            key: 'auth_secret'
+            permission: 'READ'
+        - name: 'fm_chat'
+          serving_endpoint:
+            name: 'databricks-meta-llama-3-3-70b-instruct'
+            permission: 'CAN_QUERY'
+        - name: 'fm_embeddings'
+          serving_endpoint:
+            name: 'databricks-gte-large-en'
+            permission: 'CAN_QUERY'
+
+targets:
+  dev:
+    mode: development
+    default: true

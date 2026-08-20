@@ -24,7 +24,10 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
 4. Low retrieval confidence hands off to a named human. The bot never guesses past its
    corpus.
 5. Auth is per-offer and scoped to one candidate. No internal directory identity exists
-   at this phase.
+   at this phase — *within the app's own logic*. The Databricks Apps hosting layer
+   mandates SSO for every visitor regardless (platform constraint, not configurable —
+   see §10); the pitch is scoped to "any identity can SSO in, the magic-link token is
+   what actually scopes access to one offer", not "no login screen at all".
 
 ## §2 Active deferred work
 
@@ -77,6 +80,12 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   dicts). Graceful fallback to the local stubs when no credentials are configured
   (`wiring.py`), so teammates without a workspace still get a working app. See
   NOTES_ARCHIVE.md.
+- **Deploy** (2026-08-20) – `app.py` deployed as a real Databricks App via an Asset
+  Bundle (`databricks.yml`), live at
+  `https://preboard-7474653684757026.aws.databricksapps.com`. Discovered Databricks
+  Apps mandates SSO for every visitor — no public/anonymous access exists — which
+  conflicts with the "no login screen" reading of invariant §1.5. Pitch adjusted, not
+  the architecture: see §1.5 and §10.
 
 ## §4 Release order
 
@@ -185,3 +194,38 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   `AttributeError: 'dict' object has no attribute 'as_dict'`. Only surfaced once the
   generator was actually called against a live endpoint; no unit test would have
   caught it since `StubGenerator` never touches the SDK.
+
+## §10 Deploy decisions
+
+- **Asset Bundle, not ad-hoc `apps create`/`apps deploy`**: `databricks.yml` declares
+  the app, the auth secret, and `CAN_QUERY` permission on both serving endpoints
+  (`fm_chat`, `fm_embeddings`) in one file — `databricks bundle deploy` then
+  `databricks bundle run preboard` reproduces the whole deployment, not just the code
+  push. `sync.exclude` keeps `.env`/`.git`/`misses.db`/`__pycache__` off the workspace.
+- **A literal `app.yaml` is required in the source root** – the bundle's
+  `resources.apps.preboard.config` block (command, env) looked like it should configure
+  the app but didn't take effect; the deployed app ran `python app.py` instead of
+  `streamlit run app.py` and crashed immediately (Streamlit needs its own runner, not a
+  bare Python invocation). Fixed by adding `app.yaml` at the repo root with `command`
+  and `env` — that's what Databricks Apps actually reads. The bundle's `config:` block
+  may only seed a template, not override an existing file; not fully resolved which,
+  but the working setup is: `app.yaml` is authoritative, `databricks.yml` handles
+  resources/permissions.
+- **`PREBOARD_AUTH_SECRET` is a real Databricks secret** (scope `preboard`, key
+  `auth_secret`), injected via `app.yaml`'s `valueFrom` — not the dev fallback constant.
+  Secrets are write-only from the CLI (can't be read back), so local `.env` mirrors the
+  same value for minting matching test tokens with `preboard.cli --issue-token`.
+  Rotate both together (`databricks secrets put-secret` + update `.env`) if either
+  needs to change.
+- **SSO is mandatory for Databricks Apps, not configurable** – confirmed in docs:
+  "Databricks apps do not support public access or anonymous usage, and single sign-on
+  is mandatory." Every visitor to the app URL hits a Databricks account login page
+  (Google/Microsoft/email — any identity, not only workspace members) before the
+  `?token=` magic link is ever evaluated. This is a platform constraint, not a bug —
+  see §1.5's amendment. Team decision (2026-08-20): keep it as a Databricks App and
+  adjust the pitch language rather than rehost elsewhere under time pressure; revisit
+  if the pitch needs "truly no login screen" to hold literally.
+- **Live URL**: `https://preboard-7474653684757026.aws.databricksapps.com`. Redeploy
+  with `databricks bundle deploy && databricks bundle run preboard` from the repo root
+  (needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` in the shell env, e.g. `set -a; source
+  .env; set +a`). Logs: `databricks apps logs preboard --tail-lines 100`.
