@@ -8,6 +8,13 @@ several sections of the offer packet.
 `date_context` is an optional plain-language line QA computes from preboard.offers.
 It resolves relative phrasing such as "about a week before your start date" into
 concrete timing when appropriate.
+
+`language` (PLAN_PR15 B1/D1) is keyword-only with a default so a stale two-argument
+fake fails loudly at the call site rather than silently binding the wrong thing
+(R1 — this exact bug already happened once, PR6). The corpus and citations stay
+English (NOTES.md §2's "German-first corpus" deferred item still holds, TRIGGER
+unfired) — only the answer's language changes, so nothing in the §9 retrieval
+threshold calibration (measured against English embeddings) is affected.
 """
 from __future__ import annotations
 
@@ -22,6 +29,8 @@ class Generator(Protocol):
         question: str,
         chunks: list[Chunk],
         date_context: str | None = None,
+        *,
+        language: str | None = None,
     ) -> str: ...
 
 
@@ -31,6 +40,8 @@ class StubGenerator:
     The stub intentionally returns retrieved source text directly rather than
     pretending to perform AI generation. The Databricks generator handles
     natural-language synthesis when real Databricks credentials are configured.
+    `language` is accepted (protocol conformance) but has no effect — there's no
+    translation to do when the answer is just echoed source text.
     """
 
     def generate(
@@ -38,7 +49,10 @@ class StubGenerator:
         question: str,
         chunks: list[Chunk],
         date_context: str | None = None,
+        *,
+        language: str | None = None,
     ) -> str:
+        del language
         return "\n\n".join(chunk.text.strip() for chunk in chunks)
 
 
@@ -56,11 +70,19 @@ class DatabricksFMGenerator:
         self._endpoint_name = endpoint_name
         self._client = WorkspaceClient()
 
+    # PLAN_PR15 D1: full names for the prompt instruction, keyed by the short code
+    # the frontend toggle sends. Only languages the toggle actually offers — an
+    # unrecognized code falls back to no instruction (answers in English, today's
+    # behavior) rather than guessing at a name to hand the model.
+    _LANGUAGE_NAMES = {"de": "German"}
+
     def generate(
         self,
         question: str,
         chunks: list[Chunk],
         date_context: str | None = None,
+        *,
+        language: str | None = None,
     ) -> str:
         from databricks.sdk.service.serving import (  # noqa: PLC0415
             ChatMessage,
@@ -72,6 +94,15 @@ class DatabricksFMGenerator:
         )
 
         date_line = f"{date_context}\n\n" if date_context else ""
+
+        language_name = self._LANGUAGE_NAMES.get(language or "")
+        language_line = (
+            f"Write your answer in {language_name}. The excerpts below are in English — "
+            "use them as source material, but do not quote them in English and do not "
+            "translate any document title or proper noun that appears in them.\n\n"
+            if language_name
+            else ""
+        )
 
         prompt = (
             "You are answering a new hire's question about their offer packet, "
@@ -105,6 +136,7 @@ class DatabricksFMGenerator:
             "Keep the answer focused on exactly what the candidate asked. "
             "Do not add unrelated information from other excerpts.\n\n"
 
+            f"{language_line}"
             f"{date_line}"
             f"{excerpts}\n\n"
             f"Question: {question}"

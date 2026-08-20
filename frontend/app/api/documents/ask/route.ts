@@ -10,10 +10,11 @@ export async function POST(request: Request) {
   const session = await readSession(request.headers.get("cookie"));
   if (!session) return Response.json({ error: "Authentication required." }, { status: 401 });
 
-  const { question, scope = "candidate", as_of } = (await request.json()) as {
+  const { question, scope = "candidate", as_of, language } = (await request.json()) as {
     question?: string;
     scope?: "candidate" | "hr";
     as_of?: string;
+    language?: string;
   };
   if (!question?.trim()) return Response.json({ error: "Type a question first." }, { status: 400 });
   if (question.length > 600) return Response.json({ error: "Keep questions under 600 characters." }, { status: 400 });
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
         question,
         start_date: employee.startDate.slice(0, 10),
         as_of,
+        language,
       }),
     });
     if (!response.ok) {

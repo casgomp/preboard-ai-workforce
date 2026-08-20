@@ -59,11 +59,19 @@ export function createSeedFacts(): DayOneFact[] {
   })));
 }
 
+// PLAN_PR15 R2/B5: spread across the countdown, not bunched in the last few hours
+// — the candidate dashboard's "recent changes" feed (B5) exists to show progress
+// happening over days, and a flat cluster of same-hour events would undercut
+// exactly the story it's meant to tell.
 export function createSeedHistory(): FactEvent[] {
   const now = Date.now();
+  const DAY = 24 * 3_600_000;
   return [
-    { eventId: "H001", employeeId: "E001", factKey: "employee_account", newValue: "READY", sourceSystem: "Identity Management", timestamp: new Date(now - 3 * 3_600_000).toISOString(), label: "Employee account confirmed ready" },
-    { eventId: "H002", employeeId: "E001", factKey: "badge_status", newValue: "READY", sourceSystem: "Facilities Access", timestamp: new Date(now - 2 * 3_600_000).toISOString(), label: "Building access confirmed" },
-    { eventId: "H003", employeeId: "E001", factKey: "welcome_meeting", newValue: "READY", sourceSystem: "Manager Workspace", timestamp: new Date(now - 1 * 3_600_000).toISOString(), label: "Manager welcome meeting scheduled" },
+    { eventId: "H001", employeeId: "E001", factKey: "employee_account", newValue: "READY", sourceSystem: "Identity Management", timestamp: new Date(now - 5 * DAY).toISOString(), label: "Employee account confirmed ready" },
+    { eventId: "H002", employeeId: "E001", factKey: "software_access", newValue: "READY", sourceSystem: "Access Management", timestamp: new Date(now - 4 * DAY).toISOString(), label: "Software permissions granted" },
+    { eventId: "H003", employeeId: "E001", factKey: "badge_status", newValue: "READY", sourceSystem: "Facilities Access", timestamp: new Date(now - 3 * DAY).toISOString(), label: "Building access confirmed" },
+    { eventId: "H004", employeeId: "E001", factKey: "welcome_meeting", newValue: "READY", sourceSystem: "Manager Workspace", timestamp: new Date(now - 2 * DAY).toISOString(), label: "Manager welcome meeting scheduled" },
+    { eventId: "H005", employeeId: "E001", factKey: "laptop_status", newValue: "READY", sourceSystem: "IT Asset Management", timestamp: new Date(now - 1 * DAY).toISOString(), label: "Laptop shipped and on its way" },
+    { eventId: "H006", employeeId: "E002", factKey: "badge_status", newValue: "DELAYED", sourceSystem: "Facilities Access", timestamp: new Date(now - 1 * DAY).toISOString(), label: "Building badge delayed" },
   ];
 }

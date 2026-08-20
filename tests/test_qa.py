@@ -73,9 +73,11 @@ class _FixedRetriever:
 class _RecordingGenerator:
     def __init__(self):
         self.received_chunks = None
+        self.received_language = "unset"
 
-    def generate(self, question, chunks, date_context=None):
+    def generate(self, question, chunks, date_context=None, *, language=None):
         self.received_chunks = chunks
+        self.received_language = language
         return "stub answer"
 
 
@@ -131,6 +133,23 @@ def test_broad_question_pulls_in_supporting_chunks_above_score_ratio(tmp_path):
     assert isinstance(result, Answer)
     assert {c.section for c in generator.received_chunks} == {"A", "B"}
     assert {c.source_section for c in result.citations} == {"A", "B"}
+
+
+def test_language_reaches_the_generator(tmp_path):
+    """PLAN_PR15 B1/D1: language only reaches the generator — retrieval, routing
+    and citations are untouched."""
+    chunks = [Chunk(doc_id="x", section="A", text="a")]
+    generator = _RecordingGenerator()
+    qa = QA(
+        retriever=_FixedRetriever([RetrievedChunk(chunk=chunks[0], score=1.0)]),
+        generator=generator,
+        miss_log=MissLog(tmp_path / "misses.db"),
+        confidence_threshold=0.5,
+    )
+
+    qa.ask("offer", "question", language="de")
+
+    assert generator.received_language == "de"
 
 
 @pytest.mark.parametrize(

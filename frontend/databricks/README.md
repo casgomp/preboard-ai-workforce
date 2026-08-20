@@ -4,7 +4,10 @@ This folder is the explainable Databricks path for Day One Digital Twin. Mock mo
 
 1. Select a catalog and schema in Databricks SQL.
 2. Run `setup_tables.sql`.
-3. Run `seed_data.sql` for fictional demo records.
+3. Run `seed_data.sql` for fictional demo records, then `seed_fact_events.sql` once
+   for the candidate dashboard's "recent changes" feed (PLAN_PR15 B5) — kept
+   separate from `seed_data.sql` for the same `INSERT OVERWRITE`-wipes-everything
+   reason `question_misses` is.
 4. Use `fact_layer_query.sql`, `readiness_query.sql`, and `blockers_query.sql` to explain the shared intelligence layer.
 5. Set the server-only environment variables documented in the project README, then choose `DATA_MODE=databricks`.
 

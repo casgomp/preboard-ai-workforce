@@ -33,3 +33,17 @@ export function formatDate(iso: string) {
 export function formatUpdated(iso: string) {
   return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
+
+// PLAN_PR15 B5: `formatUpdated`'s clock-time-only format is fine for feeds where
+// everything happened within the same few hours, but a multi-day "recent updates"
+// feed needs the day, not just the hour — otherwise a 5-day-old and a 1-day-old
+// event both render "00:46" and look like they happened at the same moment (a real
+// bug, caught live once fact_events actually had a multi-day spread to render).
+// Always measured against the real clock, not the demo clock — an event's actual
+// timestamp doesn't move just because the countdown is being scrubbed.
+export function formatRelativeDay(iso: string, today: Date = new Date()) {
+  const daysAgo = -daysUntilStart(iso, today);
+  if (daysAgo <= 0) return formatUpdated(iso);
+  if (daysAgo === 1) return "Yesterday";
+  return `${daysAgo} days ago`;
+}

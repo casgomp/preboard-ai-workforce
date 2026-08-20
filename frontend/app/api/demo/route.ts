@@ -1,6 +1,6 @@
 import { getAllSnapshots, getEmployeeSnapshot } from "../../../lib/snapshot";
 import { getDataProvider } from "../../../services/data";
-import { getCandidateSafeContext } from "../../../lib/privacy";
+import { getCandidateSafeContext, getCandidateSafeHistory } from "../../../lib/privacy";
 import { hasCapability, readSession } from "../../../services/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,16 @@ export async function GET(request: Request) {
     const today = asOf ? new Date(`${asOf}T12:00:00`) : new Date();
     let data = id ? await getEmployeeSnapshot(id, today) : await getAllSnapshots(today);
     if (view === "candidate" && data && !Array.isArray(data)) {
-      data = { ...data, facts: getCandidateSafeContext(data.facts), history: [], risks: [], readiness: { ...data.readiness, contributions: [] } };
+      // PLAN_PR15 D4/B5: history used to be wiped entirely for the candidate view;
+      // the dashboard now shows it (filtered, not emptied) so the app can speak
+      // first about changes that already happened, not just answer when asked.
+      data = {
+        ...data,
+        facts: getCandidateSafeContext(data.facts),
+        history: getCandidateSafeHistory(data.history, data.facts),
+        risks: [],
+        readiness: { ...data.readiness, contributions: [] },
+      };
     }
     return Response.json({ mode: process.env.DATA_MODE ?? "mock", data }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

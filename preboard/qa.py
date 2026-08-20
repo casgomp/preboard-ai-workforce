@@ -140,6 +140,7 @@ class QA:
         question: str,
         start_date: date | None = None,
         as_of: date | None = None,
+        language: str | None = None,
     ) -> AnswerResult:
         """`start_date` (PR12/NOTES.md §19, D5) is supplied by the caller instead of
         looked up — `preboard/offers.py` is gone, since the frontend's `employees`
@@ -151,7 +152,13 @@ class QA:
         `as_of` overrides "today" for that same date/T-minus context (PR7/NOTES.md
         §16, D3) — demo-only, so the same question can be shown at two points on the
         countdown without waiting real days. Neither reaches `log_miss` or auth, so
-        carries no security weight despite being an unauthenticated override."""
+        carries no security weight despite being an unauthenticated override.
+
+        `language` (PLAN_PR15 B1/D1) only reaches the generator — retrieval and
+        routing are untouched, so nothing calibrated against English embeddings
+        moves. It never reaches a Handoff: the handoff sentence is templated in
+        `server.py`, not generated, so there is nothing here for it to affect on
+        that path."""
         results = self._retriever.retrieve(offer_id, question)
         top = results[0] if results else None
         top_score = top.score if top else 0.0
@@ -174,7 +181,9 @@ class QA:
         chunks = [r.chunk for r in supporting]
 
         context = self._date_context(start_date, as_of)
-        text = self._generator.generate(question, chunks, context[0] if context else None)
+        text = self._generator.generate(
+            question, chunks, context[0] if context else None, language=language
+        )
         return Answer(
             text=text,
             citations=[

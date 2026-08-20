@@ -30,6 +30,17 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
    before it costs them the hire, not just as an FAQ-volume metric.
 3. No answer without a retrieved chunk. Every answer is grounded in retrieved doc
    content and names its source document.
+   **Amended (2026-08-21, PLAN_PR15 B6)**: this governs *answers to a candidate* —
+   `QA.ask`/`Generator.generate`, both of which require `chunks: list[Chunk]` as a
+   real argument, not optional. `preboard/drafting.py`'s `draft_section` is a
+   deliberately separate function: it drafts a proposed handbook paragraph for a
+   *gap* — a question with nothing to retrieve, which is the definition of a gap
+   — for an HR reviewer to edit before anyone publishes it. It is never called
+   from `QA.ask`, never returned to a candidate, and every response is labelled
+   "draft — needs review by <department>" so nothing it produces can be mistaken
+   for a grounded answer. The invariant still holds for the path it governs;
+   drafting is a second, clearly-separated capability, not an exception carved
+   into the first one.
 4. Low retrieval confidence hands off to a named human. The bot never guesses past its
    corpus.
 5. Auth is per-offer and scoped to one candidate. No internal directory identity exists
@@ -216,6 +227,25 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   cut line's B1/B2. Verified live in a real browser against the real workspace —
   every acceptance criterion clicked/dragged through, not just typechecked. See
   §22 and NOTES_ARCHIVE.md.
+- **PR15** (2026-08-21, branch `pr14-demo-clock`) – language, initiative, and a
+  polish pass (planned as PLAN_PR15): candidates can ask in German and get a
+  German answer citing an English document (`Generator.generate` gained a
+  keyword-only `language`); three suggested questions above the empty chat, keyed
+  off the same T-minus bands the countdown chip uses; a staged loading indicator
+  naming retrieval before writing; citations open inline instead of a native
+  tooltip; the candidate dashboard now shows recent fact changes instead of
+  wiping `history` entirely for that view (`fact_events` seeded, both mock and
+  real); a gap row can request a labelled draft paragraph from a new, explicitly
+  ungrounded code path (`preboard/drafting.py`) that never touches `QA.ask`; the
+  countdown is a room-readable hero number that renders a past start date as
+  "N days since you started", not a bare minus sign. All seven blocks shipped.
+  Found and fixed live: cross-lingual retrieval doesn't reliably find the right
+  chunk for freely-typed German questions (R3's named risk, confirmed real) —
+  the suggested-question chips sidestep it by keeping retrieval text English
+  while the answer language toggles; and a real formatting bug where a
+  multi-day-old event and a same-hour one both rendered "00:46" until
+  `formatRelativeDay` replaced clock-time-only formatting for that feed. See §23
+  and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -1085,3 +1115,120 @@ six blocks shipped, not just the cut line's B1/B2.
   are both absent on `/candidate` with no `?as_of=` at all. `python -m pytest`
   (66 passed, 17 skipped) and `npm test`/`typecheck`/`lint` all stayed green
   throughout.
+
+## §23 PR15: language, initiative, and a polish pass
+
+Six features and a polish block (planned as PLAN_PR15). All seven blocks shipped —
+the plan's own cut line stopped after the cheap four (B1-B4), but B5-B7 came in
+fast enough to ship too.
+
+- **German answers (B1/D1/D3)**: `Generator.generate` gained a fourth,
+  keyword-only parameter — `generate(self, question, chunks, date_context=None, *,
+  language=None)` — specifically so a stale two-argument fake fails loudly at the
+  call site rather than silently binding the wrong thing (R1: this exact bug
+  already happened once, PR6, and stayed red for several commits).
+  `_RecordingGenerator` in `tests/test_qa.py` updated in the same commit, plus a
+  new `test_language_reaches_the_generator`. The corpus and citations stay
+  English (§2's "German-first corpus" deferred item still holds, TRIGGER
+  unfired) — only the FM's output language changes, so nothing in the §9
+  retrieval threshold calibration moves. The HR-triggered-nothing-else-changes
+  discipline extended to the handoff sentence too: `server.py:_handoff_response`
+  templates it in German when `language == "de"` (a fixed sentence with one
+  blank — cheap to translate statically, no FM call needed) rather than leaving
+  a German answer ending in an English handoff, which the plan's own trap named
+  as reading worse than staying all-English.
+  **R3, confirmed real**: freely-typed German questions mostly fail retrieval
+  against the English-embedded corpus — measured live, 3 of 4 natural German
+  phrasings of real questions scored below `EMBEDDING_CONFIDENCE_THRESHOLD`
+  (0.53/0.535/0.443 vs. threshold 0.62; only "Wann bekomme ich meinen
+  Signing-Bonus?" cleared it, likely because "Signing-Bonus" is a shared loanword
+  giving the embedding model a lexical anchor). D1 explicitly chose not to touch
+  retrieval ("nothing calibrated moves"), so this is a real, documented
+  limitation, not silently swept under the rug: the reliable path is the
+  suggested-question chips (B2, English question text) with the language toggle
+  set to DE — retrieval runs on English, only the answer's language changes.
+  Verified live: a suggestion asked in DE returned a grounded German answer
+  citing "Anna Müller — Offer Packet" (untranslated), with the "asked at"
+  chip rendering correctly alongside it.
+- **Suggested questions (B2)**: `frontend/lib/tminus/index.ts` mirrors
+  `preboard.qa`'s `_TMINUS_BANDS` thresholds (60/14/4) and label text exactly, so
+  the chip set is keyed off the same bands the server's "asked at" chip already
+  returns — not a second, independently-guessed boundary set. Two question sets
+  (relaxed/general for the two far bands, logistics-focused for the two near
+  bands) built from six questions verified live against the real embedding
+  endpoint for *both* E001 and E002 with real margin (not borderline) — several
+  plausible-looking candidates ("What should I know about my first day?", "Who
+  do I contact if my laptop is missing?") were rejected after measuring because
+  their margin above threshold was under 0.03 for at least one employee, which
+  is exactly the trap: "a suggestion that hands off makes the feature look
+  broken at exactly the moment a judge tries it."
+- **Staged loading (B3/D6)**: client-side timers only — "Searching your offer
+  packet…" → "Writing…" at 1.2s → "Still working…" at 6s, all cleared in
+  `runAsk`'s `finally` block so a fast response never leaves a stage stuck
+  showing. Recorded here, per D6, as a progress indicator, not a trace of what
+  the server is actually doing — if a judge asks whether it's real
+  instrumentation, the honest answer is no.
+- **Citations open (B4)**: native `title` tooltip (slow, unstyled, invisible on
+  touch) replaced with a `<details>` disclosure per citation, labelled "Excerpt ·"
+  so an ellipsis-truncated 220-character excerpt (`server.py`'s
+  `_EXCERPT_LENGTH`, unchanged) reads as an intentional budget, not a bug — the
+  trap's cheaper option, chosen over raising the limit everywhere citations are
+  used.
+- **The app speaks first (B5/R2)**: the candidate view of `/api/demo` used to
+  wipe `history` to `[]` entirely; `getCandidateSafeHistory`
+  (`frontend/lib/privacy/index.ts`) now filters it by cross-referencing each
+  event's `factKey` against the *fact's own* current visibility — never by
+  parsing `event.label` text, per the trap ("an event whose fact is not
+  candidate-safe must not leak through its label"). `fact_events` had no seed
+  data anywhere (R2, confirmed true): the mock provider's `createSeedHistory`
+  had three events for one employee bunched in the last three hours, and the
+  real Unity Catalog table had zero rows. Fixed both — mock now spreads five
+  events for E001 across five days plus one for E002; a new
+  `frontend/databricks/seed_fact_events.sql` (plain `INSERT`, not
+  `INSERT OVERWRITE`, for the same reason `question_misses` is kept out of
+  `seed_data.sql` — see §19) seeds the real table, run live against the
+  workspace and verified by querying it back. **Real bug found while verifying
+  live**: `formatUpdated` only renders clock time (`HH:MM`), so a 5-day-old
+  event and a 1-day-old event both displayed "00:46" — identical — because they
+  share the same time-of-day component. A multi-day feed needs the day, not
+  just the hour; `formatRelativeDay` ("Yesterday" / "N days ago", always against
+  the *real* clock, not the scrubbed demo clock, since an event's actual
+  timestamp doesn't move when the countdown is being demoed) replaced it for
+  this feed specifically. `formatUpdated` is unchanged and still correct for the
+  same-day feeds that already used it (HR's activity sidebars).
+- **Draft the missing section (B6)**: `preboard/drafting.py`'s `draft_section`
+  is deliberately not a `Generator` implementation and is never called from
+  `QA.ask` — invariant §1.3 ("no answer without a retrieved chunk") governs
+  candidate-facing answers, where `chunks` is a required argument, not this. A
+  gap has nothing to retrieve, which is the definition of a gap. NOTES.md §1
+  amended in place (not just here) to name the distinction explicitly, per the
+  trap: write it into the invariant text itself rather than leaving invariant
+  §1.3 looking violated by a feature that never touches the path it governs.
+  New `POST /draft-section` on `server.py`, HR-gated proxy route, one button per
+  gap row (`KnowledgeGapPanel.tsx`'s `GapQuestionRow`), one click, one call —
+  never fired on page load. Verified live: clicking "Draft" on "What is the
+  wifi password at the Munich office?" returned a paragraph in the Workplace IT
+  voice using bracketed placeholders (`[designated contact or system]`,
+  `[number of days]`, `[policy detail]`) instead of inventing specifics,
+  labelled "DRAFT — NEEDS REVIEW BY WORKPLACE IT".
+- **Polish (B7)**: the candidate countdown is now a room-readable hero number
+  (`text-8xl`/`text-9xl`, `countdownHero` in `CandidateDashboard.tsx`) instead
+  of a small card — and, per the trap, a past start date renders as "N days
+  since you started" rather than PR14's bare signed integer with a minus sign.
+  The handoff card gained a reassurance line under the mailto ("Facilities
+  usually replies within a day"), reading escalation as progress rather than a
+  dead end. **The `dataviz` skill named in the plan's B7 wasn't available in
+  this environment** — same honest gap as Claude-in-Chrome in §20: the
+  countdown-position chart (§22/B5) kept its existing bar-chart treatment,
+  manually reviewed rather than run through a skill that doesn't exist here.
+  Not silently skipped or claimed as done.
+- **Verified live, not just typechecked**: every block above was clicked/typed
+  through in a real browser against the real workspace while building it, not
+  just typechecked — including the exact R3 discovery (a raw German question
+  failing retrieval, then the same question succeeding via a suggestion chip),
+  the stale-server 404 caught and fixed mid-verification (server.py needed a
+  restart to pick up `/draft-section` — the scratch uvicorn had no `--reload`),
+  and the stale-seed-data render caught and fixed mid-verification (the dev
+  server needed a restart to pick up the `data/demo/seed.ts` change). `python -m
+  pytest` (67 passed, 17 skipped) and `npm test`/`typecheck`/`lint` all stayed
+  green throughout.
