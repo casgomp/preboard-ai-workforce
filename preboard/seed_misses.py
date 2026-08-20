@@ -15,6 +15,7 @@ judges expecting a stable count.
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -64,6 +65,14 @@ _QUESTIONS: list[tuple[str, str]] = [
     ("E003", "What's the guest wifi password for visitors?"),
 ]
 
+# PLAN_PR14 B5's trap: every question logged at one clock position makes the
+# countdown-bucket chart flat, which proves nothing. Cycles through offsets that
+# clear each of preboard.qa's own _TMINUS_BANDS thresholds (60/14/4 days) plus one
+# past the start date, so all four bucket labels populate. A synthetic start_date
+# here doesn't need to match the employee's real one in `employees` — it only
+# drives days_to_start on the logged miss, never reaches retrieval or routing.
+_START_DATE_OFFSETS = [75, 20, 6, -3]
+
 
 def main() -> None:
     retriever, confidence_threshold = build_retriever(CORPUS_DIR)
@@ -80,11 +89,16 @@ def main() -> None:
 
     misses = 0
     unexpected_answers: list[str] = []
-    for employee_id, question in _QUESTIONS:
-        result = qa.ask(employee_id, question)
+    for index, (employee_id, question) in enumerate(_QUESTIONS):
+        offset = _START_DATE_OFFSETS[index % len(_START_DATE_OFFSETS)]
+        start_date = date.today() + timedelta(days=offset)
+        result = qa.ask(employee_id, question, start_date=start_date)
         if isinstance(result, Handoff):
             misses += 1
-            print(f"  miss  [{employee_id}] {question!r} -> {result.target.department or result.target.name}")
+            print(
+                f"  miss  [{employee_id}] T{offset:+d}d {question!r} -> "
+                f"{result.target.department or result.target.name}"
+            )
         else:
             assert isinstance(result, Answer)
             unexpected_answers.append(question)

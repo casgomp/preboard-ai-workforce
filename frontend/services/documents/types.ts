@@ -6,4 +6,7 @@ export type GroundedAnswer = {
   answer: string;
   citations: Array<{ documentId: string; title: string; excerpt: string }>;
   handoff?: { department: string; person: string; email: string };
+  // PLAN_PR14 B4: short "asked at" chip, e.g. "T-40 · 2-8 weeks out" — absent when
+  // there was no start_date to band against.
+  askedAt?: string | null;
 };

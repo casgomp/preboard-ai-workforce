@@ -107,6 +107,9 @@ class GroundedAnswer(BaseModel):
     answer: str
     citations: list[Citation]
     handoff: HandoffInfo | None = None
+    # PLAN_PR14 B4: short "asked at" chip, e.g. "T-40 · 2-8 weeks out" — None when
+    # QA had no start_date to band against (Answer.asked_at's own None case).
+    askedAt: str | None = None
 
 
 _EXCERPT_LENGTH = 220
@@ -152,6 +155,7 @@ def ask(req: AskRequest) -> GroundedAnswer:
                 )
                 for c in result.citations
             ],
+            askedAt=result.asked_at,
         )
 
     assert isinstance(result, Handoff)
@@ -179,9 +183,20 @@ class QuestionGap(BaseModel):
     lastSeen: str
 
 
+class CountdownGap(BaseModel):
+    bucket: str
+    count: int
+    distinctQuestions: int
+    distinctOffers: int
+    lastSeen: str
+
+
 class KnowledgeGaps(BaseModel):
     departments: list[DepartmentGap]
     questions: list[QuestionGap]
+    # PLAN_PR14 B5: where on candidates' countdowns misses land, chronologically
+    # ordered (see preboard.gap_report.countdown_gap_report), not count-descending.
+    countdown: list[CountdownGap]
 
 
 @app.get("/knowledge-gaps")
@@ -191,7 +206,7 @@ def knowledge_gaps() -> KnowledgeGaps:
     `app.py` and `gap_report.main()` already show, just as JSON. No HR/candidate
     scoping here: that's the Next.js route's job (`readSession`/`hasCapability`),
     matching how `/ask` leaves auth to the caller (NOTES.md §19, D3)."""
-    from preboard.gap_report import department_gap_report, gap_report
+    from preboard.gap_report import countdown_gap_report, department_gap_report, gap_report
 
     miss_log = app.state.miss_log
     return KnowledgeGaps(
@@ -214,5 +229,15 @@ def knowledge_gaps() -> KnowledgeGaps:
                 lastSeen=q.last_seen,
             )
             for q in gap_report(miss_log, top_n=20)
+        ],
+        countdown=[
+            CountdownGap(
+                bucket=c.bucket,
+                count=c.count,
+                distinctQuestions=c.distinct_questions,
+                distinctOffers=c.distinct_offers,
+                lastSeen=c.last_seen,
+            )
+            for c in countdown_gap_report(miss_log)
         ],
     )

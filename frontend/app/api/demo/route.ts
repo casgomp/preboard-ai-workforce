@@ -16,7 +16,13 @@ export async function GET(request: Request) {
       if (!hasCapability(session, "CANDIDATE") || !session.employeeId) return Response.json({ error: "Candidate access required." }, { status: 403 });
       id = session.employeeId;
     } else if (!hasCapability(session, "HR")) return Response.json({ error: "HR access required." }, { status: 403 });
-    let data = id ? await getEmployeeSnapshot(id) : await getAllSnapshots();
+    // PLAN_PR14 B6: `as_of` is trusted here the same way `/ask`'s is (D5's own
+    // reasoning) — it only shifts which day risk severity is computed against, never
+    // reaches log_miss or auth, so an unauthenticated-looking override carries no
+    // security weight.
+    const asOf = url.searchParams.get("as_of");
+    const today = asOf ? new Date(`${asOf}T12:00:00`) : new Date();
+    let data = id ? await getEmployeeSnapshot(id, today) : await getAllSnapshots(today);
     if (view === "candidate" && data && !Array.isArray(data)) {
       data = { ...data, facts: getCandidateSafeContext(data.facts), history: [], risks: [], readiness: { ...data.readiness, contributions: [] } };
     }

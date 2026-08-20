@@ -52,7 +52,12 @@ CREATE TABLE IF NOT EXISTS department_contacts (
 -- the chat read from one place. Seeded separately from seed_data.sql's INSERT
 -- OVERWRITE pattern (frontend/databricks/README.md) — that pattern wipes a table on
 -- every re-run, which would destroy the live-demo misses this table exists to keep.
+-- days_to_start (PLAN_PR14 B5): nullable — populated from the real clock, never
+-- from a demo `as_of` override (D5); NULL for rows logged before this column
+-- existed or where QA.ask had no start_date. On an already-provisioned workspace
+-- this CREATE TABLE IF NOT EXISTS won't retroactively add the column — run
+-- `ALTER TABLE question_misses ADD COLUMN days_to_start INT` by hand once.
 CREATE TABLE IF NOT EXISTS question_misses (
   miss_id STRING, employee_id STRING, question STRING,
-  top_score DOUBLE, department STRING, logged_at TIMESTAMP
+  top_score DOUBLE, department STRING, days_to_start INT, logged_at TIMESTAMP
 ) USING DELTA;

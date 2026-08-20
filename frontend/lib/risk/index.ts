@@ -1,6 +1,6 @@
 import { requirements as defaultRequirements } from "../requirements";
 import type { DayOneFact, DayOneRequirement, DayOneRisk, Employee } from "../types";
-import { daysUntil } from "../utils/date";
+import { daysUntilStart } from "../utils/date";
 
 const actions: Record<string, string> = {
   laptop_status: "Reserve a temporary laptop",
@@ -19,8 +19,8 @@ const titles: Record<string, string> = {
   software_access: "Software access risk",
 };
 
-export function detectRisks(employee: Employee, facts: DayOneFact[], requirements: DayOneRequirement[] = defaultRequirements): DayOneRisk[] {
-  const days = daysUntil(employee.startDate);
+export function detectRisks(employee: Employee, facts: DayOneFact[], requirements: DayOneRequirement[] = defaultRequirements, today: Date = new Date()): DayOneRisk[] {
+  const days = daysUntilStart(employee.startDate, today);
   return requirements.flatMap((requirement) => {
     const fact = facts.find((item) => item.key === requirement.factKey);
     if (!fact || fact.value === "READY" || fact.value === "TEMPORARY_SOLUTION") return [];
@@ -34,7 +34,7 @@ export function detectRisks(employee: Employee, facts: DayOneFact[], requirement
       factKey: fact.key,
       severity,
       title: titles[fact.key] ?? `${requirement.name} needs attention`,
-      reason: `${requirement.name} is ${fact.value.toLowerCase().replaceAll("_", " ")} and ${employee.name.split(" ")[0]} starts in ${days} days.`,
+      reason: `${requirement.name} is ${fact.value.toLowerCase().replaceAll("_", " ")} and ${employee.name.split(" ")[0]} ${days >= 0 ? `starts in ${days} days` : `started ${-days} days ago`}.`,
       ownerTeam: fact.ownerTeam,
       recommendedAction: actions[fact.key] ?? `Confirm a completion plan with ${fact.ownerTeam}`,
       candidateActionRequired: fact.visibility === "CANDIDATE_ACTION_REQUIRED",

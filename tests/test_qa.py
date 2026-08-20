@@ -5,7 +5,7 @@ import pytest
 
 from preboard.corpus import Chunk, LocalMarkdownSource
 from preboard.generation import StubGenerator
-from preboard.qa import QA, Answer, Handoff, _tminus_guidance, _TMINUS_OVERDUE_GUIDANCE
+from preboard.qa import QA, Answer, Handoff, _tminus_band, _TMINUS_OVERDUE_GUIDANCE
 from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever, RetrievedChunk
 from preboard.routing import Router
 from preboard.store import MissLog
@@ -147,15 +147,17 @@ def test_broad_question_pulls_in_supporting_chunks_above_score_ratio(tmp_path):
     ],
 )
 def test_tminus_guidance_picks_the_right_band_at_every_boundary(delta_days, expected_snippet):
-    assert expected_snippet in _tminus_guidance(delta_days)
+    guidance, _label = _tminus_band(delta_days)
+    assert expected_snippet in guidance
 
 
 def test_date_context_includes_start_date_and_tminus_guidance(qa):
-    context = qa._date_context(date(2026, 9, 14), as_of=date(2026, 9, 11))  # 3 days out
+    prompt_text, chip = qa._date_context(date(2026, 9, 14), as_of=date(2026, 9, 11))  # 3 days out
 
-    assert "2026-09-11" in context
-    assert "in 3 days" in context
-    assert _TMINUS_OVERDUE_GUIDANCE in context
+    assert "2026-09-11" in prompt_text
+    assert "in 3 days" in prompt_text
+    assert _TMINUS_OVERDUE_GUIDANCE in prompt_text
+    assert chip == "T-3 · final days"
 
 
 def test_date_context_is_none_without_a_start_date(qa):

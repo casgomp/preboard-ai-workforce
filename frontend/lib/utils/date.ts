@@ -7,12 +7,23 @@ export function dateInDays(days: number) {
   return date.toISOString();
 }
 
-export function daysUntil(iso: string) {
+// PLAN_PR14 D3: signed, renamed from `daysUntil` so every call site gets looked at
+// rather than silently inheriting negative behaviour — a past start date now reads
+// as e.g. -3, not clamped to 0. `today` defaults to the real clock but takes an
+// override so the demo clock (`useDemoClock`) can drive it.
+export function daysUntilStart(iso: string, today: Date = new Date()) {
   const start = new Date(iso);
-  const today = new Date();
+  const reference = new Date(today);
   start.setHours(12, 0, 0, 0);
-  today.setHours(12, 0, 0, 0);
-  return Math.max(0, Math.round((start.getTime() - today.getTime()) / DAY));
+  reference.setHours(12, 0, 0, 0);
+  return Math.round((start.getTime() - reference.getTime()) / DAY);
+}
+
+// PLAN_PR14 D1: the demo clock stores `today` at local noon (matching the
+// convention above and `dateInDays`), so slicing its UTC ISO string back to a
+// calendar date round-trips correctly for realistic timezones.
+export function toISODate(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
 export function formatDate(iso: string) {

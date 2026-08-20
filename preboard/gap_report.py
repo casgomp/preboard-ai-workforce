@@ -13,6 +13,11 @@ until then.
 department (PR8) instead of by question text — a per-question count answers "what are
 people asking that we don't have written down"; a per-department count answers "which
 team's docs need the most work", which is the stat worth putting on stage.
+
+`countdown_gap_report` (PLAN_PR14 B5) rolls misses up by where on the candidate's
+countdown they were asked — not just what candidates ask, but when. Reuses
+`preboard.qa`'s own T-minus bands for the bucket labels rather than defining a
+second set of boundaries.
 """
 from __future__ import annotations
 
@@ -20,6 +25,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from preboard.qa import TMINUS_LABELS_FAR_TO_NEAR, tminus_label
 from preboard.store import Miss, MissLog
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -28,6 +34,11 @@ _TRAILING_PUNCT_RE = re.compile(r"[?!.]+$")
 # Label for misses with no routed department — logged before routing existed (PR8),
 # or the router had no confident match (NOTES.md §17's fallback-to-recruiter case).
 UNROUTED_LABEL = "Unrouted"
+
+# Label for misses with no days_to_start — logged before that column existed, or
+# QA.ask had no start_date to compute it from (NOTES.md §19, D5's "None just means
+# no date context" case). Never fabricate a day-zero position for these.
+UNKNOWN_TIMING_LABEL = "Unknown (asked before this was tracked)"
 
 
 def _normalize(question: str) -> str:
@@ -101,6 +112,41 @@ def department_gap_report(miss_log: MissLog) -> list[DepartmentGapEntry]:
     return entries
 
 
+def _timing_bucket(days_to_start: int | None) -> str:
+    return UNKNOWN_TIMING_LABEL if days_to_start is None else tminus_label(days_to_start)
+
+
+@dataclass(frozen=True)
+class CountdownGapEntry:
+    bucket: str
+    count: int
+    distinct_questions: int
+    distinct_offers: int
+    last_seen: str
+
+
+def countdown_gap_report(miss_log: MissLog) -> list[CountdownGapEntry]:
+    groups: dict[str, list[Miss]] = {}
+    for miss in miss_log.all_misses():
+        groups.setdefault(_timing_bucket(miss.days_to_start), []).append(miss)
+
+    entries = [
+        CountdownGapEntry(
+            bucket=bucket,
+            count=len(misses),
+            distinct_questions=len({_normalize(m.question) for m in misses}),
+            distinct_offers=len({m.offer_id for m in misses}),
+            last_seen=max(m.logged_at for m in misses),
+        )
+        for bucket, misses in groups.items()
+    ]
+    # Chronological, not count-descending (department_gap_report's order) — a
+    # countdown axis is a timeline, and sorting by count would scramble it.
+    order = {label: index for index, label in enumerate(TMINUS_LABELS_FAR_TO_NEAR)}
+    entries.sort(key=lambda e: order.get(e.bucket, len(TMINUS_LABELS_FAR_TO_NEAR)))
+    return entries
+
+
 def main() -> None:
     import argparse
     from pathlib import Path
@@ -127,6 +173,13 @@ def main() -> None:
         print(
             f"  {d.department:<22}  {d.count:>3} misses  "
             f"{d.distinct_questions:>3} distinct questions  {d.distinct_offers:>3} offers"
+        )
+
+    print("\nBy countdown position:")
+    for c in countdown_gap_report(miss_log):
+        print(
+            f"  {c.bucket:<32}  {c.count:>3} misses  "
+            f"{c.distinct_questions:>3} distinct questions  {c.distinct_offers:>3} offers"
         )
 
 

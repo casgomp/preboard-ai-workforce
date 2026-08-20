@@ -26,23 +26,29 @@ SUPPORTING_SCORE_RATIO = 0.6
 # Guessed against the corpus's own lead-time language ("about a week", "ten days",
 # "three business days before you start") — not empirically probed like
 # EMBEDDING_CONFIDENCE_THRESHOLD (see NOTES.md §16/D4). Ordered by descending
-# days-until-start threshold; _tminus_guidance returns the first satisfied band, so
-# earlier entries must have the larger threshold.
-_TMINUS_BANDS: list[tuple[int, str]] = [
+# days-until-start threshold; _tminus_band returns the first satisfied band, so
+# earlier entries must have the larger threshold. The third element is a short,
+# candidate-facing label (PLAN_PR14 B4) — deliberately softer than the FM guidance
+# text, since surfacing a guessed threshold boundary in the UI turns it into a
+# claim, not just internal prompting.
+_TMINUS_BANDS: list[tuple[int, str, str]] = [
     (
         60,
         "More than 8 weeks out: reassure the candidate nothing is overdue yet — most "
         "pre-start items (equipment, paperwork) haven't started their lead time.",
+        "more than 8 weeks out",
     ),
     (
         14,
         "2-8 weeks out: pre-start items may be in motion soon; mention timing "
         "normally, no urgency.",
+        "2-8 weeks out",
     ),
     (
         4,
         "1-2 weeks out: this is close. If an excerpt states a lead time before the "
         "start date, say it should be arriving soon and worth checking on.",
+        "1-2 weeks out",
     ),
 ]
 _TMINUS_OVERDUE_GUIDANCE = (
@@ -50,13 +56,29 @@ _TMINUS_OVERDUE_GUIDANCE = (
     "a lead time before the start date with nothing to suggest it happened, treat it "
     "as overdue and tell the candidate to escalate now, not wait."
 )
+_TMINUS_OVERDUE_LABEL = "final days"
 
 
-def _tminus_guidance(delta_days: int) -> str:
-    for threshold, guidance in _TMINUS_BANDS:
+def _tminus_band(delta_days: int) -> tuple[str, str]:
+    """Returns (guidance, label): guidance goes into the FM prompt, label is short
+    enough to show a candidate directly as an "asked at" chip (PLAN_PR14 B4)."""
+    for threshold, guidance, label in _TMINUS_BANDS:
         if delta_days >= threshold:
-            return guidance
-    return _TMINUS_OVERDUE_GUIDANCE
+            return guidance, label
+    return _TMINUS_OVERDUE_GUIDANCE, _TMINUS_OVERDUE_LABEL
+
+
+def tminus_label(delta_days: int) -> str:
+    """Public accessor for just the short band label — PLAN_PR14 B5's gap-report
+    countdown buckets reuse the exact same bands the "asked at" chip uses, rather
+    than defining a second set of boundaries that could drift from these."""
+    return _tminus_band(delta_days)[1]
+
+
+# Farthest-to-nearest/overdue, for ordering countdown buckets chronologically
+# rather than by count (PLAN_PR14 B5) — a countdown axis tells a timeline story,
+# which a count-descending sort would scramble.
+TMINUS_LABELS_FAR_TO_NEAR: list[str] = [label for _, _, label in _TMINUS_BANDS] + [_TMINUS_OVERDUE_LABEL]
 
 
 @dataclass(frozen=True)
@@ -73,6 +95,9 @@ class Citation:
 class Answer:
     text: str
     citations: list[Citation]
+    # Short "asked at" chip, e.g. "T-40 · 2-8 weeks out" (PLAN_PR14 B4) — None when
+    # there was no start_date to band against, matching _date_context's None case.
+    asked_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -133,7 +158,14 @@ class QA:
 
         if top is None or top_score < self._confidence_threshold:
             target, reason = self._route(offer_id, question)
-            self._miss_log.log_miss(offer_id, question, top_score, department=target.department)
+            # PLAN_PR14 D5: days_to_start is derived from the real clock, never from
+            # `as_of` — a scrubbed demo clock must not write rows that claim a
+            # candidate asked something at a point on their countdown they didn't
+            # actually occupy. `as_of` continues to reach prompt text only.
+            days_to_start = (start_date - date.today()).days if start_date else None
+            self._miss_log.log_miss(
+                offer_id, question, top_score, department=target.department, days_to_start=days_to_start
+            )
             return Handoff(target=target, reason=reason)
 
         supporting = [
@@ -141,7 +173,8 @@ class QA:
         ]
         chunks = [r.chunk for r in supporting]
 
-        text = self._generator.generate(question, chunks, self._date_context(start_date, as_of))
+        context = self._date_context(start_date, as_of)
+        text = self._generator.generate(question, chunks, context[0] if context else None)
         return Answer(
             text=text,
             citations=[
@@ -153,6 +186,7 @@ class QA:
                 )
                 for c in chunks
             ],
+            asked_at=context[1] if context else None,
         )
 
     def _route(self, offer_id: str, question: str) -> tuple[HandoffTarget, str]:
@@ -168,11 +202,14 @@ class QA:
                     return target, f"Routed to {target.department} ({score:.2f} match)."
         return handoff_target(offer_id), "No confident match in the offer packet."
 
-    def _date_context(self, start_date: date | None, as_of: date | None = None) -> str | None:
+    def _date_context(self, start_date: date | None, as_of: date | None = None) -> tuple[str, str] | None:
         """Plain-language lines resolving the offer packet's start-date-relative
         phrasing into a concrete date (NOTES.md §15) and giving T-minus-banded
         guidance on how urgently to frame it (§16). None when the caller has no known
-        start date to give (§19) — nothing to resolve or band without one."""
+        start date to give (§19) — nothing to resolve or band without one.
+
+        Returns (prompt_text, chip): prompt_text goes to the generator, chip is the
+        short "asked at" label (PLAN_PR14 B4) attached to the returned Answer."""
         if start_date is None:
             return None
         today = as_of or date.today()
@@ -183,7 +220,12 @@ class QA:
             timing = "today"
         else:
             timing = f"{-delta} days ago"
-        return (
+        guidance, label = _tminus_band(delta)
+        prompt_text = (
             f"Today's date is {today.isoformat()}. This candidate's start date is "
-            f"{start_date.isoformat()}, which is {timing}. {_tminus_guidance(delta)}"
+            f"{start_date.isoformat()}, which is {timing}. {guidance}"
         )
+        # Traditional countdown notation: "T-40" means 40 days remain before the
+        # event (delta >= 0); "T+3" means 3 days have passed since it (delta < 0).
+        chip = f"T-{delta} · {label}" if delta >= 0 else f"T+{-delta} · {label}"
+        return prompt_text, chip

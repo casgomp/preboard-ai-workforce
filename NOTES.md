@@ -206,6 +206,16 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   below PR13's own cut line but shipped anyway); fixed a flaky auth test and a
   dead parameter in `server.py`. All ships shipped — nothing landed below the cut
   line. See §21 and NOTES_ARCHIVE.md.
+- **PR14** (2026-08-21, branch `pr14-demo-clock`) – the demo clock (planned as
+  PLAN_PR14): `as_of` now reaches the browser (a scrubber above the candidate
+  chat, gated on `?as_of=` being present), `daysUntil` became signed
+  `daysUntilStart`, answers carry a "T-40 · 2-8 weeks out" chip, the HR readiness
+  board's risk states move with the same clock, and `question_misses` gained a
+  `days_to_start` column so the Knowledge gaps panel shows a countdown-position
+  chart alongside the department breakdown. All six blocks shipped, not just the
+  cut line's B1/B2. Verified live in a real browser against the real workspace —
+  every acceptance criterion clicked/dragged through, not just typechecked. See
+  §22 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -991,3 +1001,87 @@ anyway since B1/B2/B5 came in fast.
   changes cleanly. Didn't touch their terminal's process; verified everything
   through a scratch port instead and flagged the restart in the demo script's
   pre-flight checklist.
+
+## §22 PR14: the demo clock
+
+`as_of` reached `QA.ask` and `preboard.cli` since PR7 (§16) but stopped at the
+browser — `DocumentQuestionBox.tsx` never sent it, so the strongest beat in the
+pitch (one question, two points on the countdown, two correct answers) had no way
+to happen on stage. PR14 (branch `pr14-demo-clock`, planned as PLAN_PR14) wired it
+through and spent the rest of the budget on what a movable clock makes cheap. All
+six blocks shipped, not just the cut line's B1/B2.
+
+- **One clock, in context (D1)**: `DemoClockProvider`/`useDemoClock()`
+  (`frontend/lib/demo-clock/`) at the app root, seeded from `?as_of=` on
+  whichever page mounted it. `isOverridden` reflects whether the page *loaded*
+  with `?as_of=`, not a live comparison against the real date — it gates the
+  scrubber's visibility and the "viewing as" banner (D4), so scrubbing back to
+  today's actual date doesn't silently hide the demo-mode marker. Candidate chat
+  and HR board reading the same context (not a URL param each component parses
+  itself) is what makes B3's live header update work: the scrubber lives inside
+  `DocumentQuestionBox`, but dragging it updates `CandidateDashboard`'s
+  "N days until your first day" too, since both are context consumers.
+- **`daysUntilStart`, signed (D2/D3)**: renamed from `daysUntil` specifically so
+  every call site got looked at (`CandidateDashboard`, `HRDashboard`,
+  `EmployeeDetail`, `lib/risk`) rather than silently inheriting negative
+  behavior — `Math.max(0, …)` previously clamped a past start date to "0 days",
+  which is exactly the state `_TMINUS_OVERDUE_GUIDANCE` treats as most urgent and
+  the frontend couldn't express at all. Takes an optional `today: Date` (default
+  the real clock), not a hidden module-level settable clock — two components
+  rendering in the same tick can't disagree about what day it is by construction.
+- **The scrubber (B3)**: `DemoClockScrubber` (`frontend/components/documents/`),
+  range 0-90 days before the employee's start date — a stand-in for "the signing
+  date" since `Employee` has no tracked signing date, chosen wide enough to clear
+  every `_TMINUS_BANDS` threshold (60/14/4 days). React's `onChange` fires
+  continuously while dragging a range input (that's what drives the live
+  countdown via `setToday`); the re-ask on release uses plain DOM
+  `mouseup`/`touchend`/`keyup` handlers instead, since React has no separate
+  "drag ended" event. The re-posted answer replaces the previous one
+  (`setResult` overwrites) rather than appending an unlabelled duplicate — the
+  exact failure the trap named.
+- **The "asked at" chip (B4)**: `qa.py`'s `_tminus_band` now returns
+  `(guidance, label)` instead of just the FM-prompt guidance string — the label
+  is deliberately softer/shorter than the guidance text ("2-8 weeks out" vs. the
+  full paragraph), since surfacing a guessed band boundary in the UI turns it
+  into a claim, not just internal prompting. `Answer.asked_at` /
+  `GroundedAnswer.askedAt` carry it through; countdown notation follows the
+  traditional convention (`T-40` = 40 days remain, `T+3` = 3 days have passed).
+- **The countdown-position gap report (B5)**: `question_misses` gained
+  `days_to_start` via the same nullable-column-via-`ALTER TABLE` migration
+  pattern `department` used (§18) — extended live against the real workspace
+  table, not just the local SQLite path. Computed from the real clock inside
+  `QA.ask`'s miss-logging branch, never from `as_of` (D5) — a scrubbed demo
+  clock must not write rows claiming a candidate asked something at a point on
+  their countdown they didn't occupy. `preboard.gap_report.countdown_gap_report`
+  reuses `qa.py`'s own band labels (via a new public `tminus_label`/
+  `TMINUS_LABELS_FAR_TO_NEAR`) rather than defining a second set of boundaries
+  that could drift, and orders buckets chronologically (far → near → overdue →
+  "Unknown" last), not by count — a countdown axis tells a timeline story a
+  count-descending sort would scramble. `seed_misses.py` now cycles synthetic
+  `start_date` offsets (75/20/6/-3 days) across the seeded questions specifically
+  so the chart isn't flat — a real trap, caught by reading the plan rather than
+  discovered live (a first draft without varied offsets would have dumped every
+  seeded row into one bucket).
+- **HR board on the same clock (B6)**: `lib/snapshot.ts`'s
+  `getEmployeeSnapshot`/`getAllSnapshots` gained an optional `today` param
+  threaded to `detectRisks`; `/api/demo` reads `?as_of=` the same way `/ask`
+  does (D5's reasoning — it only shifts which day risk severity is computed
+  against, never reaches `log_miss` or auth). No second scrubber UI on `/hr` —
+  the Shape section only asked for `detectRisks` to take the clock, not a new
+  control, so the URL param is the interface; verified live that a real risk
+  state (David Klein's badge delay) flips from not-yet-urgent to "High risk"
+  purely from moving `?as_of=` closer to his start date. Runs on
+  `MockDataProvider` (§2) — honest as a mechanism demo, not real data, and the
+  plan said so out loud rather than leaving it implied.
+- **Verified live, not just typechecked**: logged in as Anna in a real browser,
+  asked "When will my laptop arrive?" at `?as_of=2026-01-15` (222 days out —
+  chip read "T-222 · more than 8 weeks out", answer text said not to worry yet),
+  dragged the scrubber to T-2, watched the button read "Searching…", and got
+  back an answer that flipped to "it's likely overdue... contact
+  workplace-it@dayone.demo now" with the header's "222 days" updating to "2
+  days" live from the same drag. Logged in as Sarah (HR) at
+  `?as_of=2026-08-23` and confirmed Lukas showed `-2d` (a past start date,
+  signed) and David's risk flipped to High. Confirmed the scrubber and banner
+  are both absent on `/candidate` with no `?as_of=` at all. `python -m pytest`
+  (66 passed, 17 skipped) and `npm test`/`typecheck`/`lint` all stayed green
+  throughout.

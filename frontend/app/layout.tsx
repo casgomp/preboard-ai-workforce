@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Nav } from "../components/shared/Nav";
+import { DemoClockProvider } from "../lib/demo-clock/DemoClockProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,8 +31,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <Nav />
-        {children}
+        <DemoClockProvider>
+          <Nav />
+          {children}
+        </DemoClockProvider>
       </body>
     </html>
   );
