@@ -1,0 +1,7 @@
+[
+  { "employeeId": "E001", "buildingBadge": "READY", "parking": "IN_PROGRESS" },
+  { "employeeId": "E002", "buildingBadge": "DELAYED", "parking": "READY" },
+  { "employeeId": "E003", "buildingBadge": "READY", "parking": "IN_PROGRESS" },
+  { "employeeId": "E004", "buildingBadge": "READY", "parking": "READY" },
+  { "employeeId": "E005", "buildingBadge": "READY", "parking": "IN_PROGRESS" }
+]

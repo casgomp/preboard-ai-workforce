@@ -1,0 +1,7 @@
+[
+  { "employeeId": "E001", "welcomeMeeting": "READY", "dayOneAgenda": "READY" },
+  { "employeeId": "E002", "welcomeMeeting": "READY", "dayOneAgenda": "READY" },
+  { "employeeId": "E003", "welcomeMeeting": "READY", "dayOneAgenda": "READY" },
+  { "employeeId": "E004", "welcomeMeeting": "READY", "dayOneAgenda": "READY" },
+  { "employeeId": "E005", "welcomeMeeting": "READY", "dayOneAgenda": "READY" }
+]

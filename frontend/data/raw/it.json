@@ -1,0 +1,7 @@
+[
+  { "employeeId": "E001", "employeeAccount": "READY", "laptop": "READY", "softwareAccess": "READY" },
+  { "employeeId": "E002", "employeeAccount": "READY", "laptop": "READY", "softwareAccess": "READY" },
+  { "employeeId": "E003", "employeeAccount": "READY", "laptop": "READY", "softwareAccess": "READY" },
+  { "employeeId": "E004", "employeeAccount": "READY", "laptop": "READY", "softwareAccess": "READY" },
+  { "employeeId": "E005", "employeeAccount": "READY", "laptop": "READY", "softwareAccess": "READY" }
+]

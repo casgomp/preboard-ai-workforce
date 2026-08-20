@@ -1,0 +1,7 @@
+[
+  { "employeeId": "E001", "orientation": "READY" },
+  { "employeeId": "E002", "orientation": "READY" },
+  { "employeeId": "E003", "orientation": "IN_PROGRESS" },
+  { "employeeId": "E004", "orientation": "READY" },
+  { "employeeId": "E005", "orientation": "IN_PROGRESS" }
+]

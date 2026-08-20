@@ -1,0 +1,7 @@
+[
+  { "employeeId": "E001", "contract": "READY", "payroll": "READY", "manager": "Sarah Weber" },
+  { "employeeId": "E002", "contract": "READY", "payroll": "READY", "manager": "Nina Hoffmann" },
+  { "employeeId": "E003", "contract": "READY", "payroll": "READY", "manager": "Jonas Bauer" },
+  { "employeeId": "E004", "contract": "READY", "payroll": "READY", "manager": "Lea König" },
+  { "employeeId": "E005", "contract": "READY", "payroll": "READY", "manager": "David Neumann" }
+]
