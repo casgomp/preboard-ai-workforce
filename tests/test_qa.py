@@ -72,7 +72,7 @@ class _RecordingGenerator:
     def __init__(self):
         self.received_chunks = None
 
-    def generate(self, question, chunks):
+    def generate(self, question, chunks, date_context=None):
         self.received_chunks = chunks
         return "stub answer"
 

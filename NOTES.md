@@ -20,6 +20,11 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
 2. Pre day-1 makes no anonymity claim. The answerer is HR and already knows the
    candidate by name. The value is volume absorption, not unlinkability. Any token-split
    or k-anonymity work belongs to the day-1 variant, not here.
+   **Pitch framing (2026-08-20, §15)**: volume absorption is the mechanism, not the
+   value. The signed-to-started gap is when candidates go cold and renege — silence is
+   the risk the product addresses. The gap report matters because it's how HR learns
+   the packet is silent on exactly the thing an anxious candidate is asking about,
+   before it costs them the hire, not just as an FAQ-volume metric.
 3. No answer without a retrieved chunk. Every answer is grounded in retrieved doc
    content and names its source document.
 4. Low retrieval confidence hands off to a named human. The bot never guesses past its
@@ -56,6 +61,19 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   per question rather than reading precomputed vectors from the table. Fine at this
   corpus size. TRIGGER: the corpus grows enough that per-question embedding
   latency/cost matters — store embeddings as a column and only recompute on ingest.
+- **T-minus-aware answers, not just date-resolved ones** – §15 makes the generator
+  resolve relative phrasing ("about a week before your start date") to a concrete
+  date/day-count. The next step is letting the *content* of the answer change with
+  T-minus, not just its date arithmetic: at T-60 "nothing to do yet", at T-3 "should
+  already be there, escalate now" for the same equipment question. Real product
+  insight from the countdown framing, genuinely hard to do with a static FAQ, but
+  needs either prompt rules keyed on days-remaining bands or corpus content written
+  per band — more than the one-line fix §15 shipped. TRIGGER: time remains after the
+  core loop is solid; demoable as the same question asked at two points on the
+  countdown giving two different, both-correct answers.
+- **`preboard/offers.py` start dates are hardcoded, same stub shape as `handoff.py`'s
+  target map** – fine for two demo candidates. TRIGGER: n/a for this project's scope;
+  a real version reads start date from whatever system issues the offer.
 
 ## §3 Shipped
 
@@ -109,6 +127,15 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   added. Found and fixed a real endpoint hang (`databricks-gte-large-en` never
   returns on batches of ~20+ inputs) surfaced by this being the first time a single
   offer's merged chunk count crossed that threshold — see §14 and NOTES_ARCHIVE.md.
+- **PR6** (2026-08-20) – time-aware answers and demo-safety fixes, prompted by a
+  pre-demo review: fixed token TTL (14→90 days — was shorter than Alex Chen's own
+  46-day signed-to-start gap, so real tokens could expire before day one); resolved
+  the offer packet's start-date-relative phrasing into concrete dates via a new
+  `preboard/offers.py` + `QA._date_context`; added a countdown caption and a
+  `?view=gaps` Streamlit view for the gap report (previously only reachable via local
+  CLI, undemoable from the deployed app); wrapped `app.py`'s answer call in
+  try/except so an FM timeout degrades to a handoff instead of a traceback on stage.
+  See §15 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -155,7 +182,9 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   one. Secret comes from `PREBOARD_AUTH_SECRET`; falls back to a dev-only constant
   (`auth.py`) so the loop runs without any secret configured. **Must** be set via a
   Databricks secret scope before any real deployment – the fallback is not safe to ship.
-- Token TTL defaults to 14 days (offer-to-start-date window), overridable per call.
+- Token TTL defaults to 90 days (offer-to-start-date window), overridable per call —
+  was 14 days until §15 (2026-08-20), which was shorter than the sample data's own
+  46-day gap for Alex Chen.
 
 ## §7 PR1c decisions
 
@@ -398,3 +427,49 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   inconsistent with `LocalMarkdownSource`'s fixed offer-then-shared order, and caught
   by `test_reads_the_same_chunks_as_the_local_files` comparing the two exactly. Fixed
   with `ORDER BY CASE WHEN offer_id = :offer_id THEN 0 ELSE 1 END, chunk_order`.
+
+## §15 PR6: time-awareness and demo-safety fixes
+
+Prompted by a pre-demo review pointing out the build was a grounded Q&A bot but
+nothing in it knew what day it is or when a candidate starts — a real gap given the
+product's own "countdown to day one" framing, and one bug that made the framing
+actively false.
+
+- **TTL bug (real, not hypothetical)**: `DEFAULT_TTL_SECONDS` was 14 days, but the
+  sample data's own start dates are 25 days out (Jordan) and 46 days out (Alex) from
+  a token issued today. A token minted at offer-signing would already be dead well
+  before day one for either sample candidate — the demo data contradicted the demo's
+  own auth window. Bumped to 90 days; still a stub constant, not derived from any
+  actual notice-period distribution, but covers the sample data with margin.
+- **Date resolution, not full T-minus-aware content**: the offer packets are full of
+  start-date-relative phrasing ("about a week before your start date", "by the
+  Wednesday before you start") that the pipeline had no way to resolve — neither
+  `qa.py` nor `generation.py` looked at any date. Added `preboard/offers.py` (stub
+  offer_id → start_date lookup, same shape as `handoff.py`'s target map) and
+  `QA._date_context()`, which computes a plain-language line ("Today's date is
+  2026-08-20. This candidate's start date is 2026-09-14, which is in 25 days.") and
+  passes it to `Generator.generate` as a new optional `date_context` parameter.
+  `DatabricksFMGenerator`'s prompt now instructs the model to resolve relative
+  phrasing into a concrete date/day-count when that line is present; `StubGenerator`
+  ignores it (no LLM to do the resolving). This is date arithmetic on top of the
+  existing single-pass retrieval, not the stronger "answer changes by T-minus band"
+  idea (nothing to do at T-60 vs. escalate now at T-3) — that's deferred in §2 as a
+  distinct, larger piece of work.
+- **`app.py` had no error handling around the one call that hits the network on every
+  question** (`get_qa().ask(...)`) — an FM timeout or a permission blip would have
+  rendered a raw traceback mid-demo. Wrapped in try/except; on any exception it logs
+  to stdout (`databricks apps logs`) and degrades to the same handoff message as a
+  low-confidence miss, per invariant §1.4's "never guess, escalate instead" default —
+  this is a caught-exception fallback, not itself a MissLog entry, since it isn't a
+  retrieval-confidence signal.
+- **Gap report wasn't demoable from the deployed app** — `gap_report.py` was a local
+  CLI reading `misses.db`, but that file lives in the deployed container's ephemeral
+  filesystem, unreachable via CLI once deployed. Added a second Streamlit view
+  (`app.py`'s `main()` branches on `?view=gaps`, not behind the offer token — this is
+  an internal HR view, not the candidate-facing flow) that renders the same
+  `gap_report()` function's output as a table. Both views share one `app.py`/one
+  deploy; no new auth mechanism.
+- **Countdown caption**: `?view=gaps` aside, the normal chat view now shows "You
+  start in N days (Month D, YYYY)" under the title, sourced from the same
+  `preboard/offers.py` lookup — makes the countdown framing visible on the page
+  itself, not just in answer text.

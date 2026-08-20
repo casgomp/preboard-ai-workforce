@@ -7,9 +7,11 @@ off to a named human (invariant 4).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from preboard.generation import Generator
 from preboard.handoff import HandoffTarget, handoff_target
+from preboard.offers import offer_info
 from preboard.retrieval import Retriever
 from preboard.store import MissLog
 
@@ -73,8 +75,28 @@ class QA:
         ]
         chunks = [r.chunk for r in supporting]
 
-        text = self._generator.generate(question, chunks)
+        text = self._generator.generate(question, chunks, self._date_context(offer_id))
         return Answer(
             text=text,
             citations=[Citation(source_doc=c.doc_id, source_section=c.section) for c in chunks],
+        )
+
+    def _date_context(self, offer_id: str) -> str | None:
+        """Plain-language line resolving the offer packet's start-date-relative
+        phrasing (NOTES.md §15). None for offer_ids with no known start date (e.g. the
+        shared-company-only fallback) — nothing to resolve without one."""
+        info = offer_info(offer_id)
+        if info is None:
+            return None
+        today = date.today()
+        delta = (info.start_date - today).days
+        if delta > 0:
+            timing = f"in {delta} days"
+        elif delta == 0:
+            timing = "today"
+        else:
+            timing = f"{-delta} days ago"
+        return (
+            f"Today's date is {today.isoformat()}. This candidate's start date is "
+            f"{info.start_date.isoformat()}, which is {timing}."
         )

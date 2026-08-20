@@ -15,7 +15,11 @@ import os
 import time
 
 _DEV_SECRET = b"preboard-dev-secret-do-not-use-in-prod"
-DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 14  # offer-to-start-date window
+# Offer-to-start-date window: real hires sign weeks to months before their start date
+# (sample data: Alex Chen's is 46 days), so 14 days expired tokens before day one for
+# anyone signing more than two weeks out. 90 days covers a typical notice period with
+# margin (NOTES.md §15).
+DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 90
 
 
 class InvalidToken(Exception):
