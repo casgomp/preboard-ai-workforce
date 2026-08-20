@@ -15,10 +15,7 @@ import os
 import time
 
 _DEV_SECRET = b"preboard-dev-secret-do-not-use-in-prod"
-# Offer-to-start-date window: real hires sign weeks to months before their start date
-# (sample data: Alex Chen's is 46 days), so 14 days expired tokens before day one for
-# anyone signing more than two weeks out. 90 days covers a typical notice period with
-# margin (NOTES.md §15).
+
 DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 90
 
 
@@ -36,7 +33,24 @@ def _b64(data: bytes) -> str:
 
 
 def _unb64(s: str) -> bytes:
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+    if not s:
+        raise binascii.Error("empty base64")
+
+    allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    if any(char not in allowed for char in s):
+        raise binascii.Error("invalid base64")
+
+    if len(s) % 4 == 1:
+        raise binascii.Error("invalid base64 length")
+
+    padded = s + "=" * (-len(s) % 4)
+    decoded = base64.urlsafe_b64decode(padded)
+
+    # Reject non-canonical Base64 representations.
+    if _b64(decoded) != s:
+        raise binascii.Error("non-canonical base64")
+
+    return decoded
 
 
 def issue_token(offer_id: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
@@ -57,6 +71,7 @@ def verify_token(token: str) -> str:
         raise InvalidToken("malformed token") from exc
 
     expected_sig = hmac.new(_secret(), payload, hashlib.sha256).digest()
+
     if not hmac.compare_digest(sig, expected_sig):
         raise InvalidToken("bad signature")
 
