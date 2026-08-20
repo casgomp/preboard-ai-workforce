@@ -25,6 +25,10 @@ resources:
             value: 'false'
           - name: 'DATABRICKS_FM_ENDPOINT'
             value: 'databricks-meta-llama-3-3-70b-instruct'
+          - name: 'DATABRICKS_CATALOG'
+            value: 'workspace'
+          - name: 'DATABRICKS_SCHEMA'
+            value: 'preboard'
           - name: 'PREBOARD_AUTH_SECRET'
             value_from: 'auth_secret'
       resources:
@@ -45,9 +49,22 @@ resources:
           sql_warehouse:
             id: '43f29df3c2e0da1d'
             permission: 'CAN_USE'
-        - name: 'offer_chunks_table'
+        # PR12/NOTES.md §19: offer_chunks (PR3) is dropped — converged onto Emre's
+        # frontend schema (document_chunks/company_documents/department_contacts),
+        # not a second parallel table.
+        - name: 'document_chunks_table'
           uc_securable:
-            securable_full_name: 'workspace.preboard.offer_chunks'
+            securable_full_name: 'workspace.preboard.document_chunks'
+            securable_type: 'TABLE'
+            permission: 'SELECT'
+        - name: 'company_documents_table'
+          uc_securable:
+            securable_full_name: 'workspace.preboard.company_documents'
+            securable_type: 'TABLE'
+            permission: 'SELECT'
+        - name: 'department_contacts_table'
+          uc_securable:
+            securable_full_name: 'workspace.preboard.department_contacts'
             securable_type: 'TABLE'
             permission: 'SELECT'
 

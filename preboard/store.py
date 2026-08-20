@@ -79,3 +79,62 @@ class MissLog:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+class UnityCatalogMissLog:
+    """Miss log backed by Unity Catalog's `question_misses` table (PR12/NOTES.md
+    §19) — same `log_miss`/`all_misses` shape as `MissLog`, so `QA` doesn't know or
+    care which backend it's writing to. Used by `server.py`; the CLI/`app.py`
+    fallback path keeps local SQLite (`MissLog`) — `misses.db` dying on redeploy was
+    already an accepted, documented limitation there (NOTES.md §2), not something
+    this PR needed to fix to converge the schema.
+    """
+
+    def __init__(self, warehouse_id: str):
+        from databricks.sdk import WorkspaceClient  # noqa: PLC0415
+
+        from preboard.uc_corpus import catalog_and_schema  # noqa: PLC0415
+
+        catalog, schema = catalog_and_schema()
+        self._warehouse_id = warehouse_id
+        self._table = f"{catalog}.{schema}.question_misses"
+        self._client = WorkspaceClient()
+
+    def log_miss(
+        self, offer_id: str, question: str, top_score: float, department: str | None = None
+    ) -> None:
+        import uuid  # noqa: PLC0415
+
+        from databricks.sdk.service.sql import StatementParameterListItem  # noqa: PLC0415
+
+        self._client.statement_execution.execute_statement(
+            statement=(
+                f"INSERT INTO {self._table} "
+                "(miss_id, employee_id, question, top_score, department, logged_at) "
+                "VALUES (:miss_id, :employee_id, :question, :top_score, :department, "
+                "current_timestamp())"
+            ),
+            warehouse_id=self._warehouse_id,
+            parameters=[
+                StatementParameterListItem(name="miss_id", value=str(uuid.uuid4()), type="STRING"),
+                StatementParameterListItem(name="employee_id", value=offer_id, type="STRING"),
+                StatementParameterListItem(name="question", value=question, type="STRING"),
+                StatementParameterListItem(name="top_score", value=str(top_score), type="DOUBLE"),
+                StatementParameterListItem(name="department", value=department, type="STRING"),
+            ],
+            wait_timeout="30s",
+        )
+
+    def all_misses(self) -> list[Miss]:
+        response = self._client.statement_execution.execute_statement(
+            statement=(
+                "SELECT employee_id, question, top_score, logged_at, department "
+                f"FROM {self._table} ORDER BY logged_at"
+            ),
+            warehouse_id=self._warehouse_id,
+            wait_timeout="30s",
+        )
+        rows = response.result.data_array if response.result else None
+        if not rows:
+            return []
+        return [Miss(*row) for row in rows]

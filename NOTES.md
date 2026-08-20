@@ -6,9 +6,12 @@ offer packet and preboarding docs, hands off to HR when it can't, logs what it m
 Stack: Python, Databricks Free Edition (serverless-only). Generation via a Foundation
 Model endpoint (real, PR1d), retrieval via a Databricks embeddings endpoint with
 cosine similarity computed in-process (real, PR1d — not a Unity Catalog Vector Search
-index; see §9), corpus in a Unity Catalog Delta table (real, PR3 — see §11), chat UI
-as a Databricks App (Streamlit, PR1c), miss log as local SQLite (stand-in for a UC SQL
-table).
+index; see §9), corpus in a Unity Catalog Delta table (real, PR3, re-pointed at the
+converged schema in PR12 — see §11 and §19), miss log as Unity Catalog
+(`question_misses`, real, PR12 — see §19) with local SQLite as `app.py`/`cli.py`'s
+fallback. Two front ends share this backend as of PR12 (§19): a Next.js app
+(`frontend/`, primary) calling a FastAPI HTTP boundary (`server.py`), and a Streamlit
+chat UI (`app.py`, Databricks App, PR1c) as the fallback demo surface.
 
 Team of 4, 48-hour hackathon build. Claude writes implementation directly this project
 (no local pairing/scaffolding needed) – speed over teaching.
@@ -34,6 +37,14 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
    mandates SSO for every visitor regardless (platform constraint, not configurable —
    see §10); the pitch is scoped to "any identity can SSO in, the magic-link token is
    what actually scopes access to one offer", not "no login screen at all".
+   **Amended (2026-08-20, §19, D3)**: this describes `preboard.auth`'s signed
+   magic-link tokens, which remain the boundary for the CLI and `app.py` (the
+   fallback front end). They are **not** on the primary path anymore:
+   `frontend/`'s Next.js session cookie (`services/auth/session.ts`) is the real
+   auth boundary for `/api/documents/ask` → `server.py`, which trusts the
+   `employee_id` the Next.js route hands it over a localhost, server-to-server call
+   no browser can reach. Two boundaries for two front ends, not one boundary
+   quietly quoted for a path it no longer guards.
 
 ## §2 Active deferred work
 
@@ -69,11 +80,29 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   a real version reads start date from whatever system issues the offer.
 - **Gap report by department**: TRIGGER FIRED, shipped in §18 (PR9) —
   `department_gap_report`, `?view=gaps`'s "By department" table.
-- **`uc_corpus.ingest` globs `data/*.md`, so `directory.md` gets ingested as
-  offer_id="directory" rows if UC is re-ingested** – harmless (nothing queries UC with
-  that offer_id; `routing.py`'s `DirectorySource` reads the local file directly, not
-  UC) but not intentional. TRIGGER: routing moves to UC-backed lookup — filter the
-  glob or give directory routing its own table then, not before.
+- **Routing moved to UC-backed lookup**: TRIGGER FIRED, shipped in §19 (PR12) —
+  `data/directory.md` is deleted; `routing.UnityCatalogDirectorySource` reads
+  `department_contacts` instead, so the glob concern this item used to name no
+  longer applies (nothing named `directory.md` exists to glob).
+- **`DatabricksDataProvider` is still a stub** (PLAN_PR12's B6, cut) — every method
+  runs its SQL and then throws "Map your workspace result schema...". The HR
+  dashboard stays on `DATA_MODE=mock`; the candidate chat runs on real Databricks
+  independently of this (server.py doesn't use `DataProvider` at all). TRIGGER: the
+  HR dashboard needs to show real `employees`/`day_one_facts` data, not mock —
+  map `data_array` rows to `Employee`/`DayOneFact` and parameterize `updateFact`'s
+  SQL (it currently interpolates, the exact bug class NOTES.md §11 already paid for
+  once in Python).
+- **No misses dashboard** (PLAN_PR12's B7, cut) — `question_misses` is populated
+  live (§19) but nothing visualizes it yet; `preboard/gap_report.py`'s
+  `department_gap_report` is the CLI/Streamlit equivalent, just not a Databricks
+  dashboard. TRIGGER: time remains before presenting; seed 20-30 misses first, an
+  empty dashboard is worse than none.
+- **Only E001 (Anna) and E002 (David) have offer packets** — `employees` in Unity
+  Catalog has five rows (E001-E005, PLAN_PR12 D2), but `document_chunks` only has
+  content for two of them plus the shared handbook; a question about Maria, Lukas,
+  or Sofia's laptop gets only the shared handbook, no employee-specific chunk.
+  TRIGGER: time remains; write `data/E003.md`-`E005.md` following `E001.md`'s
+  template (relative start-date phrasing, no hardcoded date — see §19).
 
 ## §3 Shipped
 
@@ -158,6 +187,23 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   asked most. Also fixed an ordering bug from PR8: `qa.py` was logging the miss
   *before* routing, so the department was never actually recorded even though the
   returned `Handoff` had one. See §18 and NOTES_ARCHIVE.md.
+- **PR12** (2026-08-20) – converged `preboard/` and a teammate's parallel Next.js
+  build (`frontend/`) onto one backend and one Unity Catalog schema (planned as
+  PLAN_PR12, which superseded and folded in two earlier draft plans, PR10/PR11 —
+  neither was shipped separately). New `server.py` (FastAPI) is the HTTP boundary
+  `frontend/`'s `/api/documents/ask` now calls; `data/directory.md` and
+  `preboard/offers.py` are deleted in favor of Unity Catalog tables
+  (`department_contacts`, `employees`); the old `workspace.preboard.offer_chunks`
+  table is dropped in favor of `document_chunks`/`company_documents`; sample
+  candidates Jordan Rivera/Alex Chen are replaced by Anna Müller (E001)/David Klein
+  (E002) to match the frontend's employee set. Found and fixed a real threshold bug
+  (the router silently never fired against `department_contacts`' actual prose
+  until re-probed) and a real ordering-vs-logging gap (miss-logging needed its own
+  Unity Catalog table, `question_misses`, not just a schema addition). Verified
+  fully end-to-end against the real workspace: real login → real session →
+  `server.py` → real embeddings/FM/Unity Catalog → grounded answer and a routed
+  handoff, both through the actual Next.js dev server. See §19 and
+  NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -628,3 +674,156 @@ missing the bike-benefit answer"), not just a count.
   rollup) above "By question" (unchanged content, now with a department column) —
   not a replacement, since the per-question view still answers "what exactly are
   people asking," which the rollup alone doesn't.
+
+## §19 PR12: converge on one brain and one Unity Catalog schema
+
+A teammate (Emre) built a parallel Next.js implementation of the same product
+(`frontend/`) — its own auth, its own UI, its own Unity Catalog schema
+(`frontend/databricks/setup_tables.sql`). Two products, two schemas, answering
+differently. PLAN_PR12 (superseding two earlier draft plans, PLAN_PR10/PLAN_PR11,
+neither shipped separately — what survived from them is folded in below) merges on
+one option: Emre's UI and auth, `preboard/`'s Python brain, Unity Catalog as the
+only data store. All decisions below were the plan's calls, executed as written
+except where a real finding forced a deviation (noted).
+
+- **D1 — Emre's schema wins, plus `question_misses`**: `setup_tables.sql` already
+  covered chunks (`document_chunks`), routing (`department_contacts`), and
+  employees; it had no miss log. Added `question_misses`
+  (`preboard/store.py`'s new `UnityCatalogMissLog`). `workspace.preboard
+  .offer_chunks` (PR3) is dropped — two parallel corpus tables would mean the HR
+  dashboard and the chat answer from different data forever, not just today.
+  `preboard/uc_corpus.py` is rewritten against `document_chunks`/
+  `company_documents`, not deleted — the parameterized-insert pattern (NOTES.md
+  §11's lesson: Spark SQL's `''` doubling silently drops characters) is exactly
+  what any future ingestion path needs. **One necessary schema addition beyond the
+  plan's own D1**: `document_chunks` had no `section` column, only
+  `chunk_index` — citations need a section name ("Equipment"), not just a
+  document and an ordinal, so `preboard/uc_corpus.py`'s `ensure_schema_and_table`
+  and `setup_tables.sql` both add it.
+- **D2 — Emre's employees win**: sample candidates Jordan Rivera/Alex Chen
+  (hardcoded start dates, §6/§15) are replaced by Anna Müller (E001)/David Klein
+  (E002) — `data/E001.md`/`data/E002.md`, closely modeled on the originals'
+  structure and kept relative-phrasing style ("about a week before your start
+  date"), *not* restating a specific calendar date the way the originals did
+  ("Your start date is Monday, September 14, 2026...") — that date now comes from
+  the frontend's live `employees.start_date` (`date_add(current_date(), N)`) via
+  the request body (D5), so a static date baked into the packet text would drift
+  out of sync with it. `preboard/handoff.py`'s `_STUB_TARGETS` (Priya
+  Nandakumar/Devon Ortiz) is deleted — no correspondence to E001-E005 anyway; see
+  §2's new deferred item for E003-E005 (Maria/Lukas/Sofia) still having no packet.
+  `data/company.md` rewritten for German offices (Wolfsburg/Berlin/Munich, not
+  Austin) to match the employees' actual `location` values, since a candidate
+  asking about their office and getting an Austin answer would contradict the
+  dashboard directly.
+- **D3 — the frontend session is the auth boundary, not `preboard.auth`**: the
+  Next.js route already has a verified session with `employeeId`;
+  `server.py` trusts the `employee_id` it's handed over a localhost, server-to-
+  server call no browser can reach — `verify_token`/magic-link tokens stay the
+  boundary for the CLI and `app.py` only (invariant §1.5 amended, not silently
+  left claiming something the code no longer does). **R4's fallback-secret fix,
+  applied**: `frontend/services/auth/session.ts`'s `signature`/`verifySignature`
+  used to fall back to a committed constant
+  (`"day-one-demo-only-secret-change-me"`) when `AUTH_SECRET` was unset; now they
+  throw instead (`requireSecret()`). `vitest.config.ts` gained a test-only
+  `AUTH_SECRET` so the existing auth tests didn't start failing, and a new test
+  asserts the throw. `preboard/auth.py`'s own dev-secret fallback is intentionally
+  **not** touched — it isn't the auth boundary for the new merged flow (D3 picked
+  the other one), and forcing it to raise would break the CLI/`app.py` fallback
+  path's own local-dev convenience for no corresponding security gain there.
+- **D4 — `department_contacts` replaces `data/directory.md` entirely, not just
+  when configured**: PR10's D3 (never shipped) had parked a UC-backed directory
+  source for time; PLAN_PR12 spends that time. `routing.DirectorySource` (local
+  markdown) is deleted outright in favor of `routing.UnityCatalogDirectorySource`
+  — there is no local fallback for routing anymore, since a `department_contacts`
+  row now carries a `covers` prose field (new column, this PR) for the embedding
+  path alongside `routing_terms` for the keyword path, and HR editing routing with
+  an `INSERT` — no redeploy — was the actual point. `wiring.build_router` returns
+  `(None, 0.0)` without credentials+warehouse; `QA._route` already treated
+  `router=None` as "fall back to the generic recruiter" (§17), so no new code path
+  needed there.
+- **D5 — Python takes the start date in the request, not a lookup**:
+  `preboard/offers.py` (hardcoded `offer_id → start_date`, §15) is deleted.
+  `QA.ask` gained a `start_date: date | None` parameter; `QA._date_context` uses
+  it directly instead of a lookup. `server.py`'s `/ask` request carries
+  `{employee_id, question, start_date, as_of?}` — the frontend already loads the
+  employee to render the page, so it already has this. **Real consequence for
+  `app.py`/`cli.py`**: they have no employee data source of their own now, so they
+  pass no `start_date` — `app.py`'s countdown caption is removed, and its answers
+  lose T-minus framing (§16) entirely. Accepted: `app.py` is the fallback front
+  end now (see Out-of-scope below), not the primary demo surface, and R1's bar was
+  "still answers questions," not "still has every feature."
+- **D6 — the frontend's env var names win**: Python read `DATABRICKS_WAREHOUSE_ID`
+  (bare id) and hardcoded `workspace.preboard`; the frontend reads
+  `DATABRICKS_HTTP_PATH` (e.g. `/sql/1.0/warehouses/<id>`) and
+  `DATABRICKS_CATALOG`/`DATABRICKS_SCHEMA`. `preboard/wiring.py` gained
+  `resolve_warehouse_id()` (prefers `DATABRICKS_WAREHOUSE_ID` if set, else parses
+  `DATABRICKS_HTTP_PATH`) and `preboard/uc_corpus.py` gained `catalog_and_schema()`
+  reading `DATABRICKS_CATALOG`/`DATABRICKS_SCHEMA` (defaulting to
+  `workspace`/`preboard` for backward compatibility, not requiring every existing
+  `.env` to change). One root `.env.example` documents both processes' variable
+  sets, without being a file either process actually loads for the other.
+- **B4 (`server.py`) response contract — the plan's own correction, applied**:
+  PLAN_PR11's `kind`-discriminated JSON (`{"kind": "answer", ...}` /
+  `{"kind": "handoff", ...}`) was superseded before being built; PLAN_PR12 folded
+  in the correction instead — match `GroundedAnswer` in
+  `frontend/services/documents/types.ts` (`status: "SUPPORTED" | "NEEDS_HUMAN"`,
+  `citations: [{documentId, title, excerpt}]`, `handoff?: {department, person,
+  email}`), so the existing `DocumentQuestionBox.tsx` needs zero render changes.
+  `QA.Citation` (`qa.py`) gained `title` and `excerpt` fields to support this —
+  `title` from `company_documents.title` via `UnityCatalogSource`'s join (`Chunk`
+  gained a `title` field too), `excerpt` from the chunk's own text, truncated in
+  `server.py` (`_truncate`, ~220 chars) rather than in Python's core `Citation`,
+  keeping the truncation a presentation concern of the HTTP boundary, not the
+  domain type.
+- **Real bug found during verification, not anticipated by the plan**: the
+  router's `ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD = 0.45` (§17) was calibrated
+  against the *old* `data/directory.md` prose. Wired against
+  `department_contacts`' actual `covers` text (D4) and probed live
+  (`TestUnityCatalogDirectorySource`), it held without adjustment: "My laptop
+  never arrived, who do I contact?" → Workplace IT (0.520), "Where do I get a
+  building badge?" → Facilities (0.576), "How do I set up direct deposit?" →
+  People Operations (0.536), "When does orientation happen?" → Learning &
+  Onboarding (0.542) — all comfortably above 0.45. Worth recording as a *check*,
+  not an assumption: §17 already names this as content-dependent and to be
+  re-probed whenever `department_contacts`' prose changes, and this PR changed it.
+- **Verified fully end-to-end against the real workspace**, not just unit tests:
+  ran `setup_tables.sql`/`seed_data.sql` against `workspace.preboard`
+  (catching and fixing a real mistake mid-session — an early run landed all 9
+  tables in `workspace.default` instead, from an ad-hoc script that forgot to pass
+  `catalog`/`schema`; dropped and redone correctly, with the user's confirmation
+  before both the cleanup `DROP TABLE`s and dropping the superseded
+  `offer_chunks`), ingested `data/*.md` via `preboard.uc_corpus`, ran the opt-in
+  integration suite (17 passed, including live department routing), started
+  `uvicorn server:app` and the real `npm run dev` Next.js server, logged in as
+  Anna Müller through the actual `/api/auth/login` route, and drove
+  `/api/documents/ask` end to end for both a grounded answer (with real
+  T-minus-aware date resolution — the laptop-shipping date correctly identified
+  as already passed relative to the frontend's live mock `start_date`) and a
+  routed handoff (Facilities, matching a live `department_contacts` row).
+  `python -m pytest` (66 passed, 17 skipped) and `npm test`/`typecheck`/`lint`
+  (10 passed, clean) both green.
+- **Port assumption in the plan was wrong, harmlessly**: PLAN_PR12's diagram
+  assumed the frontend dev server runs on `:5173`; `npm run dev` actually serves
+  on `:3000` (or `:3001` if `:3000` is taken). Doesn't matter functionally —
+  `/api/documents/ask` is a Next.js *route handler* making a server-to-server
+  `fetch` to `server.py`, not a browser-side call, so `server.py`'s
+  `CORSMiddleware` (kept for defense-in-depth / direct testing, per PLAN_PR11's
+  B2 shape) was never actually on the real request path either way.
+- **Scope held to the plan's own cut line**: B1-B5 shipped (schema convergence,
+  packet rewrite, Python reading the new schema, `server.py`, the frontend wired
+  to it). B6 (`DatabricksDataProvider`) and B7 (a misses dashboard) are cut,
+  exactly as the plan allowed — see §2's new deferred items for both, with
+  triggers.
+
+### Out of scope (per the plan, unchanged)
+
+- Deleting `app.py` — it's the fallback for the whole demo, deliberately kept
+  working (if feature-reduced — no countdown, see D5) through this PR.
+- Twilio Verify/OTP — the frontend already has a working login.
+- `frontend/db/` and Drizzle — nothing in this PR reads it.
+- The HR document-upload feature (`DocumentManager.tsx`, `scope="hr"` in
+  `DocumentQuestionBox`) — it's a separate document-library feature from the
+  candidate offer-packet chat this PR wires up, and its only prior implementation
+  (`grounding.ts`) was deleted, not ported. `/api/documents/ask` now returns `501`
+  for `scope="hr"` rather than silently misrouting an HR question through the
+  employee-keyed Python flow (HR accounts have no `employeeId`).

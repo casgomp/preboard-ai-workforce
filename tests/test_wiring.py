@@ -12,16 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever
-from preboard.routing import Router
-from preboard.wiring import build_router, has_databricks_credentials
+from preboard.wiring import build_router, has_databricks_credentials, resolve_warehouse_id
 
 CORPUS_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for var in ("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"):
+    for var in (
+        "DATABRICKS_HOST",
+        "DATABRICKS_TOKEN",
+        "DATABRICKS_CLIENT_ID",
+        "DATABRICKS_CLIENT_SECRET",
+        "DATABRICKS_WAREHOUSE_ID",
+        "DATABRICKS_HTTP_PATH",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -55,11 +60,39 @@ def test_host_alone_is_not_enough(monkeypatch):
     assert has_databricks_credentials() is False
 
 
-def test_build_router_without_credentials_mirrors_build_retriever():
-    """No credentials configured (clean_env, autouse) -> keyword-scored router, same
-    threshold constant KeywordRetriever-scored retrieval uses (NOTES.md §17)."""
+def test_build_router_without_credentials_returns_none():
+    """PR12/NOTES.md §19, D4: routing has no local fallback anymore — `data/directory.md`
+    is gone, and `department_contacts` only exists in Unity Catalog. Without
+    credentials+warehouse, `build_router` returns `(None, 0.0)`; `QA._route` already
+    treats `router=None` as "fall back to the generic recruiter" (NOTES.md §17)."""
     router, threshold = build_router(CORPUS_DIR)
 
-    assert isinstance(router, Router)
-    assert isinstance(router._retriever, KeywordRetriever)
-    assert threshold == CONFIDENCE_THRESHOLD
+    assert router is None
+    assert threshold == 0.0
+
+
+def test_build_router_with_credentials_but_no_warehouse_returns_none(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_HOST", "https://x")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "x")
+
+    router, threshold = build_router(CORPUS_DIR)
+
+    assert router is None
+    assert threshold == 0.0
+
+
+def test_resolve_warehouse_id_prefers_explicit_id(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_WAREHOUSE_ID", "abc123")
+    monkeypatch.setenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/other456")
+
+    assert resolve_warehouse_id() == "abc123"
+
+
+def test_resolve_warehouse_id_falls_back_to_http_path(monkeypatch):
+    monkeypatch.setenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/other456")
+
+    assert resolve_warehouse_id() == "other456"
+
+
+def test_resolve_warehouse_id_is_none_without_either():
+    assert resolve_warehouse_id() is None

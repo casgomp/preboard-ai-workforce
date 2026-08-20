@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from preboard.wiring import has_databricks_credentials  # noqa: E402
+from preboard.wiring import has_databricks_credentials, resolve_warehouse_id  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_DATABRICKS_INTEGRATION_TESTS") != "1" or not has_databricks_credentials(),
@@ -28,18 +28,17 @@ pytestmark = pytest.mark.skipif(
 CORPUS_DIR = Path(__file__).resolve().parent.parent / "data"
 
 GROUNDED_CASES = [
-    ("jordan-rivera", "When does my signing bonus get paid?"),
-    ("jordan-rivera", "When is my start date?"),
-    ("jordan-rivera", "How much PTO do I accrue?"),
-    ("alex-chen", "Is this role remote or in office?"),
-    ("alex-chen", "When does my laptop arrive?"),
+    ("E001", "When does my laptop arrive?"),
+    ("E001", "When does my signing bonus get paid?"),
+    ("E002", "Is my offer contingent on a reference check?"),
+    ("E002", "When does my laptop arrive?"),
 ]
 
 UNGROUNDED_CASES = [
-    ("jordan-rivera", "What's your favorite pizza topping?"),
-    ("alex-chen", "What's my manager's favorite coffee order?"),
-    ("jordan-rivera", "Can I negotiate a higher salary before I start?"),
-    ("alex-chen", "Will I get stock options?"),
+    ("E001", "What's your favorite pizza topping?"),
+    ("E002", "What's my manager's favorite coffee order?"),
+    ("E001", "Can I negotiate a higher salary before I start?"),
+    ("E002", "Will I get stock options?"),
 ]
 
 
@@ -80,10 +79,10 @@ def test_generator_grounds_its_answer_in_the_chunk():
 
     generator = DatabricksFMGenerator(os.environ.get("DATABRICKS_FM_ENDPOINT", DEFAULT_FM_ENDPOINT))
     chunk = Chunk(
-        doc_id="jordan-rivera",
+        doc_id="E001",
         section="Compensation and signing bonus",
         text=(
-            "Your signing bonus (as stated in your offer letter) pays out in your second "
+            "Your signing bonus (as stated in your offer letter) pays out with your second "
             "paycheck, not your first. It is subject to a 12-month clawback if you leave "
             "voluntarily before your first anniversary."
         ),
@@ -95,21 +94,19 @@ def test_generator_grounds_its_answer_in_the_chunk():
     assert "second paycheck" in answer.lower() or "second pay" in answer.lower()
 
 
-@pytest.mark.skipif(
-    not os.environ.get("DATABRICKS_WAREHOUSE_ID"), reason="DATABRICKS_WAREHOUSE_ID not configured"
-)
+@pytest.mark.skipif(not resolve_warehouse_id(), reason="no warehouse configured")
 class TestUnityCatalogSource:
-    """Requires `preboard.uc_corpus` to have been ingested already (NOTES.md §9) —
-    this tests reading, not re-ingesting on every run."""
+    """Requires `preboard.uc_corpus` to have been ingested already — this tests
+    reading, not re-ingesting on every run."""
 
     def test_reads_the_same_chunks_as_the_local_files(self):
         from preboard.corpus import LocalMarkdownSource
         from preboard.uc_corpus import UnityCatalogSource
 
-        uc_source = UnityCatalogSource(os.environ["DATABRICKS_WAREHOUSE_ID"])
+        uc_source = UnityCatalogSource(resolve_warehouse_id())
         local_source = LocalMarkdownSource(CORPUS_DIR)
 
-        for offer_id in ("jordan-rivera", "alex-chen"):
+        for offer_id in ("E001", "E002"):
             uc_chunks = uc_source.load(offer_id)
             local_chunks = local_source.load(offer_id)
             assert [(c.doc_id, c.section, c.text) for c in uc_chunks] == [
@@ -120,11 +117,59 @@ class TestUnityCatalogSource:
         from preboard.corpus import SHARED_DOC_ID
         from preboard.uc_corpus import UnityCatalogSource
 
-        source = UnityCatalogSource(os.environ["DATABRICKS_WAREHOUSE_ID"])
+        source = UnityCatalogSource(resolve_warehouse_id())
         chunks = source.load("nonexistent-offer")
 
         assert chunks
         assert all(c.doc_id == SHARED_DOC_ID for c in chunks)
+
+
+@pytest.mark.skipif(not resolve_warehouse_id(), reason="no warehouse configured")
+class TestUnityCatalogDirectorySource:
+    """Requires `frontend/databricks/setup_tables.sql` + `seed_data.sql` to have been
+    run already (NOTES.md §19) — this tests reading department_contacts, not seeding
+    it. Scores are printed rather than hard-asserted into a pass/fail band for most
+    cases: this is the calibration record (like GROUNDED_CASES above), not a fixed
+    contract, since routing.ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD was set from
+    exactly this kind of probe against the *previous* directory content (§17) and
+    should be re-checked, not assumed, whenever department_contacts' prose changes."""
+
+    def _router(self):
+        from preboard.embedding_retrieval import EmbeddingRetriever
+        from preboard.routing import Router, UnityCatalogDirectorySource
+        from preboard.uc_corpus import catalog_and_schema
+
+        catalog, schema = catalog_and_schema()
+        source = UnityCatalogDirectorySource(resolve_warehouse_id(), catalog, schema)
+        return Router(EmbeddingRetriever(source))
+
+    def test_loads_all_four_departments(self):
+        from preboard.routing import UnityCatalogDirectorySource
+        from preboard.uc_corpus import catalog_and_schema
+
+        catalog, schema = catalog_and_schema()
+        source = UnityCatalogDirectorySource(resolve_warehouse_id(), catalog, schema)
+
+        sections = {c.section for c in source.load("ignored")}
+        assert sections == {"Workplace IT", "Facilities", "People Operations", "Learning & Onboarding"}
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "My laptop never arrived, who do I contact?",
+            "Where do I get a building badge?",
+            "How do I set up direct deposit?",
+            "When does orientation happen?",
+        ],
+    )
+    def test_routes_a_clear_question_somewhere_confident(self, question):
+        from preboard.routing import ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD
+
+        routed = self._router().route(question)
+        assert routed is not None
+        target, score = routed
+        print(f"{question!r} -> {target.department} ({score:.3f})")
+        assert score >= ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD
 
 
 def test_embedding_batches_larger_than_the_endpoint_limit():

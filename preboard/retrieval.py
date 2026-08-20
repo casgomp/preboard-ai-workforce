@@ -41,6 +41,22 @@ def _tokenize(text: str) -> set[str]:
     return {w for w in _WORD_RE.findall(text.lower()) if w not in _STOPWORDS}
 
 
+def _overlap(q_tokens: set[str], c_tokens: set[str]) -> set[str]:
+    """Exact matches, plus a prefix match for tokens of 4+ chars (PR12/NOTES.md §19,
+    folded in from PLAN_PR10 D2) — ported from the frontend's `wordMatches`
+    (`grounding.ts`, deleted here) so "park" still matches a chunk that only says
+    "parking", and "badge" matches "badges". Short tokens are excluded from prefix
+    matching because they produce too many accidental matches ("in" would prefix-match
+    "info", "internal", ...)."""
+    direct = q_tokens & c_tokens
+    prefix = {
+        qt
+        for qt in q_tokens - direct
+        if len(qt) >= 4 and any(len(ct) >= 4 and (ct.startswith(qt) or qt.startswith(ct)) for ct in c_tokens)
+    }
+    return direct | prefix
+
+
 @dataclass(frozen=True)
 class RetrievedChunk:
     chunk: Chunk
@@ -71,7 +87,7 @@ class KeywordRetriever:
             c_tokens = _tokenize(chunk.text) | _tokenize(chunk.section)
             if not c_tokens:
                 continue
-            overlap = q_tokens & c_tokens
+            overlap = _overlap(q_tokens, c_tokens)
             if len(overlap) < min(MIN_OVERLAP_TOKENS, len(q_tokens)):
                 continue
             score = len(overlap) / len(q_tokens)

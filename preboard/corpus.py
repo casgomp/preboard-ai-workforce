@@ -15,6 +15,10 @@ class Chunk:
     doc_id: str
     section: str
     text: str
+    # Document title for citations (PR12/NOTES.md §19) — `UnityCatalogSource` joins
+    # `company_documents.title`; `LocalMarkdownSource` leaves this None and callers
+    # fall back to `doc_id`, since local stub files have no separate title record.
+    title: str | None = None
 
 
 # Company-wide info (benefits baseline, policies, culture — not tied to any one offer)

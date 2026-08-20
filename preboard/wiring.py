@@ -1,6 +1,6 @@
 """Chooses real Databricks components vs. local stubs, based on whether credentials
 (and a SQL warehouse, for the Unity Catalog corpus) are configured. Centralized so the
-CLI and the Streamlit app apply the same fallback instead of each guessing
+CLI, the Streamlit app, and server.py apply the same fallback instead of each guessing
 independently — a teammate without credentials still gets a working (stubbed) app, no
 separate code path to maintain.
 """
@@ -12,11 +12,10 @@ from pathlib import Path
 from preboard.corpus import ChunkSource, LocalMarkdownSource
 from preboard.generation import Generator, StubGenerator
 from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever, Retriever
-from preboard.routing import DirectorySource, Router, ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD
+from preboard.routing import Router, ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD, UnityCatalogDirectorySource
 
 FM_ENDPOINT_ENV = "DATABRICKS_FM_ENDPOINT"
 DEFAULT_FM_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
-WAREHOUSE_ID_ENV = "DATABRICKS_WAREHOUSE_ID"
 
 
 def has_databricks_credentials() -> bool:
@@ -35,8 +34,20 @@ def has_databricks_credentials() -> bool:
     return has_pat or has_oauth
 
 
+def resolve_warehouse_id() -> str | None:
+    """PR12/NOTES.md §19, D6: DATABRICKS_HTTP_PATH (the frontend's name, e.g.
+    "/sql/1.0/warehouses/<id>") and DATABRICKS_WAREHOUSE_ID (Python's original name,
+    a bare id) name the same warehouse. The frontend's name wins when both exist;
+    WAREHOUSE_ID still works directly so existing local .env files don't break."""
+    explicit = os.environ.get("DATABRICKS_WAREHOUSE_ID")
+    if explicit:
+        return explicit
+    http_path = os.environ.get("DATABRICKS_HTTP_PATH")
+    return http_path.rstrip("/").split("/")[-1] if http_path else None
+
+
 def has_uc_warehouse() -> bool:
-    return bool(os.environ.get(WAREHOUSE_ID_ENV))
+    return bool(resolve_warehouse_id())
 
 
 def build_chunk_source(corpus_dir: Path) -> ChunkSource:
@@ -46,7 +57,7 @@ def build_chunk_source(corpus_dir: Path) -> ChunkSource:
     if has_databricks_credentials() and has_uc_warehouse():
         from preboard.uc_corpus import UnityCatalogSource
 
-        return UnityCatalogSource(os.environ[WAREHOUSE_ID_ENV])
+        return UnityCatalogSource(resolve_warehouse_id())
     return LocalMarkdownSource(corpus_dir)
 
 
@@ -63,19 +74,44 @@ def build_retriever(corpus_dir: Path) -> tuple[Retriever, float]:
     return KeywordRetriever(source), CONFIDENCE_THRESHOLD
 
 
-def build_router(corpus_dir: Path) -> tuple[Router, float]:
-    """Mirrors `build_retriever`'s credential check and reuses the same Retriever
-    implementations, just pointed at `data/directory.md` instead of an offer's own
-    corpus — but with its own threshold in the embedding case
-    (`ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD`, not `EMBEDDING_CONFIDENCE_THRESHOLD`):
-    short directory blurbs score lower than offer-packet text even for a correct
-    match, so the two thresholds aren't interchangeable (NOTES.md §17)."""
-    source = DirectorySource(corpus_dir)
-    if has_databricks_credentials():
-        from preboard.embedding_retrieval import EmbeddingRetriever
+def build_router(corpus_dir: Path) -> tuple[Router | None, float]:
+    """Unlike `build_retriever`, there is no local fallback (PR12/NOTES.md §19, D4):
+    `data/directory.md` is gone, and `department_contacts` in Unity Catalog is the
+    only source of routing truth now — that's what lets HR edit routing with an
+    `INSERT`, no redeploy. Without credentials+warehouse, routing is simply
+    unavailable: `QA._route` already treats `router=None` as "fall back to the
+    generic recruiter" (NOTES.md §17), so callers don't need a special case.
+    `corpus_dir` is accepted only to keep this call-compatible with
+    `build_retriever`'s signature at call sites; it's unused."""
+    del corpus_dir
+    if not (has_databricks_credentials() and has_uc_warehouse()):
+        return None, 0.0
 
-        return Router(EmbeddingRetriever(source)), ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD
-    return Router(KeywordRetriever(source)), CONFIDENCE_THRESHOLD
+    from preboard.embedding_retrieval import EmbeddingRetriever
+
+    source = UnityCatalogDirectorySource(resolve_warehouse_id(), *_catalog_and_schema())
+    return Router(EmbeddingRetriever(source)), ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD
+
+
+def _catalog_and_schema() -> tuple[str, str]:
+    from preboard.uc_corpus import catalog_and_schema
+
+    return catalog_and_schema()
+
+
+def build_miss_log(local_db_path: Path):
+    """`UnityCatalogMissLog` (question_misses) when credentials+warehouse are
+    configured, else local SQLite at `local_db_path` — mirrors `build_retriever`'s
+    fallback shape. Used by `server.py`; `app.py`/`cli.py` keep local SQLite
+    unconditionally (NOTES.md §2's already-accepted limitation), so this isn't
+    wired into them."""
+    if has_databricks_credentials() and has_uc_warehouse():
+        from preboard.store import UnityCatalogMissLog
+
+        return UnityCatalogMissLog(resolve_warehouse_id())
+    from preboard.store import MissLog
+
+    return MissLog(local_db_path)
 
 
 def build_generator() -> Generator:

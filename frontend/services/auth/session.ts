@@ -28,13 +28,23 @@ async function digest(value: string) {
   return [...new Uint8Array(result)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+// PR12/NOTES.md §19, D3/R4: the frontend session is now the auth boundary for the
+// whole merged system (Python trusts the employee_id it's handed over localhost), so
+// a predictable fallback secret here is a real weakness, not just a dev convenience.
+// Raise instead of silently signing/verifying with a committed constant.
+function requireSecret(): string {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) throw new Error("AUTH_SECRET is not set — refusing to sign or verify a session with a fallback secret.");
+  return secret;
+}
+
 async function signature(payload: string) {
-  const key = await crypto.subtle.importKey("raw", encoder.encode(process.env.AUTH_SECRET ?? "day-one-demo-only-secret-change-me"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey("raw", encoder.encode(requireSecret()), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return base64UrlEncode(await crypto.subtle.sign("HMAC", key, encoder.encode(payload)));
 }
 
 async function verifySignature(payload: string, suppliedSignature: string) {
-  const key = await crypto.subtle.importKey("raw", encoder.encode(process.env.AUTH_SECRET ?? "day-one-demo-only-secret-change-me"), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  const key = await crypto.subtle.importKey("raw", encoder.encode(requireSecret()), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
   return crypto.subtle.verify("HMAC", key, base64UrlDecode(suppliedSignature), encoder.encode(payload));
 }
 

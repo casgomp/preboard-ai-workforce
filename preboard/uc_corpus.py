@@ -1,32 +1,57 @@
-"""Corpus storage in Unity Catalog (NOTES.md §2/§9): a Delta table replacing the local
-markdown files `LocalMarkdownSource` reads. Import of the SDK is deferred, same
-reasoning as generation.py/embedding_retrieval.py: the rest of the app runs without
-`databricks-sdk` installed or credentials configured.
+"""Corpus storage in Unity Catalog (PR12/NOTES.md §19): `document_chunks` joined to
+`company_documents` — the frontend's schema (`frontend/databricks/setup_tables.sql`),
+not the old `workspace.preboard.offer_chunks` from PR3. Two parallel schemas meant the
+HR dashboard and the chat answered from different tables; this converges on one.
+
+Rewritten against the new tables, not deleted: the parameterized-insert pattern below
+is what any future ingestion path needs, same lesson as PR3 (NOTES.md §11 — Spark
+SQL's `''` quote-doubling silently drops characters; parameters sidestep it
+entirely).
 
 Embeddings are still computed live per question (embedding_retrieval.py) rather than
-stored here — this table holds the raw chunk text UC is meant to hold, not a vector
-index. See NOTES.md §2 for why a managed Vector Search index isn't used at this scale.
+stored here — see NOTES.md §2.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from preboard.corpus import SHARED_DOC_ID, Chunk, load_chunks
 
-CATALOG = "workspace"
-SCHEMA = "preboard"
-TABLE = "offer_chunks"
-FULL_TABLE_NAME = f"{CATALOG}.{SCHEMA}.{TABLE}"
+DEFAULT_CATALOG = "workspace"
+DEFAULT_SCHEMA = "preboard"
+
+# Friendly citation titles (Answer.citations[].title, matching the frontend's
+# GroundedAnswer contract) — company_documents.title, not the bare document_id.
+_DOCUMENT_TITLES = {
+    "E001": "Anna Müller — Offer Packet",
+    "E002": "David Klein — Offer Packet",
+    SHARED_DOC_ID: "Employee Handbook",
+}
+
+
+def catalog_and_schema() -> tuple[str, str]:
+    """PR12 D6: the frontend's env var names win — DATABRICKS_CATALOG/
+    DATABRICKS_SCHEMA replace Python's old hardcoded 'workspace'/'preboard'
+    constants, defaulted here only for backward-compatible local dev."""
+    return (
+        os.environ.get("DATABRICKS_CATALOG", DEFAULT_CATALOG),
+        os.environ.get("DATABRICKS_SCHEMA", DEFAULT_SCHEMA),
+    )
 
 
 class UnityCatalogSource:
-    """Reads chunks for one offer, plus the shared company-wide doc (corpus.py's
-    SHARED_DOC_ID), from `workspace.preboard.offer_chunks`."""
+    """Reads chunks for one employee, plus the shared handbook (corpus.py's
+    SHARED_DOC_ID), from `document_chunks` joined to `company_documents` for the
+    citation title."""
 
     def __init__(self, warehouse_id: str):
         from databricks.sdk import WorkspaceClient  # noqa: PLC0415
 
+        catalog, schema = catalog_and_schema()
         self._warehouse_id = warehouse_id
+        self._chunks_table = f"{catalog}.{schema}.document_chunks"
+        self._docs_table = f"{catalog}.{schema}.company_documents"
         self._client = WorkspaceClient()
 
     def load(self, offer_id: str) -> list[Chunk]:
@@ -34,13 +59,16 @@ class UnityCatalogSource:
 
         response = self._client.statement_execution.execute_statement(
             statement=(
-                f"SELECT doc_id, section, text FROM {FULL_TABLE_NAME} "
-                "WHERE offer_id = :offer_id OR offer_id = :shared_id "
-                # Offer-specific chunks before shared ones, matching LocalMarkdownSource's
-                # order — plain `ORDER BY offer_id` would put "company" before
-                # "jordan-rivera" alphabetically but after "alex-chen", an inconsistency
-                # test_reads_the_same_chunks_as_the_local_files caught.
-                "ORDER BY CASE WHEN offer_id = :offer_id THEN 0 ELSE 1 END, chunk_order"
+                "SELECT dc.document_id, dc.section, dc.content, cd.title "
+                f"FROM {self._chunks_table} dc LEFT JOIN {self._docs_table} cd "
+                "ON dc.document_id = cd.document_id "
+                "WHERE dc.document_id = :offer_id OR dc.document_id = :shared_id "
+                # Employee chunks before the shared handbook, matching
+                # LocalMarkdownSource's fixed order — see PR3/NOTES.md §14 for the
+                # ordering bug this CASE avoids (plain ORDER BY document_id put the
+                # handbook before or after employee chunks inconsistently depending
+                # on alphabetical order).
+                "ORDER BY CASE WHEN dc.document_id = :offer_id THEN 0 ELSE 1 END, dc.chunk_index"
             ),
             warehouse_id=self._warehouse_id,
             parameters=[
@@ -52,19 +80,26 @@ class UnityCatalogSource:
         rows = response.result.data_array if response.result else None
         if not rows:
             return []
-        return [Chunk(doc_id=row[0], section=row[1], text=row[2]) for row in rows]
+        return [Chunk(doc_id=row[0], section=row[1], text=row[2], title=row[3]) for row in rows]
 
 
-def ensure_schema_and_table(client, warehouse_id: str) -> None:
+def ensure_schema_and_table(client, warehouse_id: str, catalog: str, schema: str) -> None:
     for statement in (
-        f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}",
+        f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}",
         f"""
-        CREATE TABLE IF NOT EXISTS {FULL_TABLE_NAME} (
-            offer_id STRING,
-            doc_id STRING,
-            section STRING,
-            text STRING,
-            chunk_order INT
+        CREATE TABLE IF NOT EXISTS {catalog}.{schema}.company_documents (
+            document_id STRING, title STRING, filename STRING, mime_type STRING,
+            department STRING, owner_name STRING, owner_email STRING, audience STRING,
+            raw_storage_uri STRING, extracted_text STRING, status STRING, uploaded_by STRING,
+            created_at TIMESTAMP, chunk_count INT
+        )
+        """,
+        # `section` is this ingestion path's own addition to the frontend's
+        # document_chunks — needed for citations to name a section, not just a
+        # document (NOTES.md §19).
+        f"""
+        CREATE TABLE IF NOT EXISTS {catalog}.{schema}.document_chunks (
+            chunk_id STRING, document_id STRING, chunk_index INT, section STRING, content STRING
         )
         """,
     ):
@@ -76,19 +111,20 @@ def ensure_schema_and_table(client, warehouse_id: str) -> None:
 
 
 def ingest(corpus_dir: Path, warehouse_id: str) -> int:
-    """Replaces the table contents with every `<corpus_dir>/*.md` file's chunks.
-    Idempotent — safe to re-run after editing a local offer packet.
-
-    Parameterized inserts, not string-interpolated SQL: a first version built one
-    giant VALUES literal by hand-escaping quotes with SQL's standard `''` doubling,
-    which Spark SQL silently ignores (it expects `\\'`, not `''`) — "hasn't" round-
-    tripped as "hasnt" with no error. Parameters sidestep escaping entirely.
-    """
+    """Replaces document_chunks/company_documents contents with every
+    `<corpus_dir>/*.md` file's chunks. Idempotent — safe to re-run after editing a
+    local packet. Does not touch department_contacts, employees, or question_misses —
+    those are `frontend/databricks/seed_data.sql`'s and the running app's, not this
+    ingestion path's, concern."""
     from databricks.sdk import WorkspaceClient  # noqa: PLC0415
     from databricks.sdk.service.sql import StatementParameterListItem  # noqa: PLC0415
 
+    catalog, schema = catalog_and_schema()
+    chunks_table = f"{catalog}.{schema}.document_chunks"
+    docs_table = f"{catalog}.{schema}.company_documents"
+
     client = WorkspaceClient()
-    ensure_schema_and_table(client, warehouse_id)
+    ensure_schema_and_table(client, warehouse_id, catalog, schema)
 
     def run(statement: str, parameters: list[StatementParameterListItem] | None = None):
         response = client.statement_execution.execute_statement(
@@ -98,21 +134,43 @@ def ingest(corpus_dir: Path, warehouse_id: str) -> int:
             raise RuntimeError(f"ingest failed: {response.status.error}")
         return response
 
-    run(f"DELETE FROM {FULL_TABLE_NAME}")
+    run(f"DELETE FROM {chunks_table}")
+    run(f"DELETE FROM {docs_table}")
 
     count = 0
     for doc_path in sorted(corpus_dir.glob("*.md")):
-        offer_id = doc_path.stem
-        for i, chunk in enumerate(load_chunks(doc_path)):
+        document_id = doc_path.stem
+        chunks = load_chunks(doc_path)
+
+        run(
+            f"INSERT INTO {docs_table} "
+            "(document_id, title, department, audience, status, created_at, chunk_count) "
+            "VALUES (:document_id, :title, :department, :audience, :status, "
+            "current_timestamp(), :chunk_count)",
+            parameters=[
+                StatementParameterListItem(name="document_id", value=document_id, type="STRING"),
+                StatementParameterListItem(
+                    name="title", value=_DOCUMENT_TITLES.get(document_id, document_id), type="STRING"
+                ),
+                StatementParameterListItem(name="department", value="Preboarding", type="STRING"),
+                StatementParameterListItem(name="audience", value="ALL_EMPLOYEES", type="STRING"),
+                StatementParameterListItem(name="status", value="READY", type="STRING"),
+                StatementParameterListItem(name="chunk_count", value=str(len(chunks)), type="INT"),
+            ],
+        )
+
+        for i, chunk in enumerate(chunks):
             run(
-                f"INSERT INTO {FULL_TABLE_NAME} (offer_id, doc_id, section, text, chunk_order) "
-                "VALUES (:offer_id, :doc_id, :section, :text, :chunk_order)",
+                f"INSERT INTO {chunks_table} (chunk_id, document_id, chunk_index, section, content) "
+                "VALUES (:chunk_id, :document_id, :chunk_index, :section, :content)",
                 parameters=[
-                    StatementParameterListItem(name="offer_id", value=offer_id, type="STRING"),
-                    StatementParameterListItem(name="doc_id", value=chunk.doc_id, type="STRING"),
+                    StatementParameterListItem(
+                        name="chunk_id", value=f"{document_id}-{i}", type="STRING"
+                    ),
+                    StatementParameterListItem(name="document_id", value=document_id, type="STRING"),
+                    StatementParameterListItem(name="chunk_index", value=str(i), type="INT"),
                     StatementParameterListItem(name="section", value=chunk.section, type="STRING"),
-                    StatementParameterListItem(name="text", value=chunk.text, type="STRING"),
-                    StatementParameterListItem(name="chunk_order", value=str(i), type="INT"),
+                    StatementParameterListItem(name="content", value=chunk.text, type="STRING"),
                 ],
             )
             count += 1
@@ -122,20 +180,22 @@ def ingest(corpus_dir: Path, warehouse_id: str) -> int:
 
 def main() -> None:
     import argparse
-    import os
+
+    from preboard.wiring import resolve_warehouse_id
 
     parser = argparse.ArgumentParser(description="Ingest data/*.md into Unity Catalog")
     parser.add_argument(
         "--corpus-dir", type=Path, default=Path(__file__).resolve().parent.parent / "data"
     )
-    parser.add_argument("--warehouse-id", default=os.environ.get("DATABRICKS_WAREHOUSE_ID"))
+    parser.add_argument("--warehouse-id", default=resolve_warehouse_id())
     args = parser.parse_args()
 
     if not args.warehouse_id:
-        raise SystemExit("--warehouse-id or DATABRICKS_WAREHOUSE_ID is required")
+        raise SystemExit("--warehouse-id, DATABRICKS_WAREHOUSE_ID, or DATABRICKS_HTTP_PATH is required")
 
     count = ingest(args.corpus_dir, args.warehouse_id)
-    print(f"Ingested {count} chunks into {FULL_TABLE_NAME}")
+    catalog, schema = catalog_and_schema()
+    print(f"Ingested {count} chunks into {catalog}.{schema}.document_chunks")
 
 
 if __name__ == "__main__":

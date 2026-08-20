@@ -33,8 +33,27 @@ INSERT OVERWRITE company_knowledge VALUES
 ('K02','Dress guidance','dress',null,'Fictional demo: smart casual is a comfortable choice.'),
 ('K03','Orientation','orientation',null,'Fictional demo: orientation covers company basics, safety and support contacts.');
 
+-- covers (PR12/NOTES.md §19): natural-language prose for the semantic-match routing
+-- path (preboard/routing.py) — routing_terms stays the literal keyword-match path.
+-- Term lists absorbed from the now-deleted frontend/services/documents/grounding.ts,
+-- which had a richer set than this file originally seeded.
+-- Covers text enriched from a teammate's parallel directory work (commit abc0471,
+-- "Enhance company directory with detailed coverage areas") — that commit polished
+-- the pre-PR12 5-department local data/directory.md, superseded by this table
+-- (NOTES.md §19), but its coverage detail was genuinely good and worth folding in.
+-- Security & Compliance had no equivalent department here (Emre's set has 4, not
+-- 5) — folded into People Operations, the closest real owner of I-9/background-
+-- check/compliance topics.
 INSERT OVERWRITE department_contacts VALUES
-('Workplace IT','Michael Braun','workplace-it@dayone.demo',array('account','device','laptop','software')),
-('Facilities','Laura Stein','facilities@dayone.demo',array('badge','building','office','parking')),
-('People Operations','Julia Hartmann','people-operations@dayone.demo',array('contract','payroll','policy','tax')),
-('Learning & Onboarding','Felix Weber','onboarding@dayone.demo',array('orientation','training'));
+('Workplace IT','Michael Braun','workplace-it@dayone.demo',
+ array('account','computer','device','email','it','laptop','login','password','software','technical','vpn'),
+ 'Laptop and equipment shipping or delays, lost or damaged equipment, account and software access, password and login setup, VPN and security tooling, company computer setup, home-office equipment and stipend cards, access to company systems.'),
+('Facilities','Laura Stein','facilities@dayone.demo',
+ array('access','badge','building','cafeteria','desk','food','office','park','parking','room','transport'),
+ 'Office access and badges, parking and bike racks, desk assignments, building hours, conference room booking, office location, remote and home-office setup, workplace accommodations and logistics.'),
+('People Operations','Julia Hartmann','people-operations@dayone.demo',
+ array('background','benefit','compliance','contract','document','holiday','hr','onboarding','pay','payroll','policy','salary','tax','verification'),
+ 'Offer letter and start-date questions, contract questions, first-day and general onboarding logistics, PTO policy, pay dates and payroll, tax forms, signing bonus payout and clawback terms, benefits enrollment, holiday policy, I-9 verification and background check status, confidentiality agreements and code of conduct questions.'),
+('Learning & Onboarding','Felix Weber','onboarding@dayone.demo',
+ array('course','learn','orientation','training'),
+ 'Orientation schedule, required training courses, and learning resources for new hires.');

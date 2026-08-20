@@ -18,7 +18,6 @@ load_dotenv()
 from preboard.auth import InvalidToken, verify_token  # noqa: E402
 from preboard.gap_report import department_gap_report, gap_report  # noqa: E402
 from preboard.handoff import handoff_target  # noqa: E402
-from preboard.offers import offer_info  # noqa: E402
 from preboard.qa import QA, Answer, Handoff  # noqa: E402
 from preboard.wiring import (  # noqa: E402
     build_generator,
@@ -134,16 +133,11 @@ def main() -> None:
     except ValueError:
         as_of = None
 
-    info = offer_info(offer_id)
-    if info is not None:
-        today = as_of or date.today()
-        delta = (info.start_date - today).days
-        if delta > 0:
-            st.caption(f"You start in {delta} days ({info.start_date:%B %d, %Y}).")
-        elif delta == 0:
-            st.caption("You start today!")
-        else:
-            st.caption(f"You started {info.start_date:%B %d, %Y}.")
+    # No countdown caption here anymore (PR12/NOTES.md §19, D5): `preboard/offers.py`
+    # is gone, and this Streamlit app has no employee data source of its own to look
+    # a start date up from. It's the fallback front end now, not the primary demo
+    # surface — the frontend (which does have an employees table) shows the
+    # countdown and passes start_date through to server.py's /ask.
 
     if "history" not in st.session_state:
         st.session_state.history = []

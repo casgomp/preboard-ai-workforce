@@ -11,7 +11,6 @@ from datetime import date
 
 from preboard.generation import Generator
 from preboard.handoff import HandoffTarget, handoff_target
-from preboard.offers import offer_info
 from preboard.retrieval import Retriever
 from preboard.routing import Router
 from preboard.store import MissLog
@@ -64,6 +63,10 @@ def _tminus_guidance(delta_days: int) -> str:
 class Citation:
     source_doc: str
     source_section: str
+    title: str | None = None
+    # Supporting text (PR12/NOTES.md §19) — server.py's GroundedAnswer.citations[].excerpt
+    # needs an actual snippet of the chunk, not just its section name.
+    excerpt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,12 +109,24 @@ class QA:
         self._router = router
         self._router_threshold = router_threshold
 
-    def ask(self, offer_id: str, question: str, as_of: date | None = None) -> AnswerResult:
-        """`as_of` overrides "today" for the date/T-minus context injected into the
-        generated answer (PR7/NOTES.md §16, D3) — demo-only, so the same question can
-        be shown at two points on the countdown without waiting real days. It affects
-        only the prompt text built below; it never reaches `log_miss` or auth, so it
-        carries no security weight even though it's an unauthenticated override."""
+    def ask(
+        self,
+        offer_id: str,
+        question: str,
+        start_date: date | None = None,
+        as_of: date | None = None,
+    ) -> AnswerResult:
+        """`start_date` (PR12/NOTES.md §19, D5) is supplied by the caller instead of
+        looked up — `preboard/offers.py` is gone, since the frontend's `employees`
+        table (mock or real) already has this by the time it renders the page and
+        computes it live (`date_add(current_date(), N)`), unlike the old hardcoded
+        stub. `None` (the CLI/`app.py` fallback path, which has no employee source of
+        its own) just means no date/T-minus framing in the answer, not an error.
+
+        `as_of` overrides "today" for that same date/T-minus context (PR7/NOTES.md
+        §16, D3) — demo-only, so the same question can be shown at two points on the
+        countdown without waiting real days. Neither reaches `log_miss` or auth, so
+        carries no security weight despite being an unauthenticated override."""
         results = self._retriever.retrieve(offer_id, question)
         top = results[0] if results else None
         top_score = top.score if top else 0.0
@@ -126,10 +141,18 @@ class QA:
         ]
         chunks = [r.chunk for r in supporting]
 
-        text = self._generator.generate(question, chunks, self._date_context(offer_id, as_of))
+        text = self._generator.generate(question, chunks, self._date_context(start_date, as_of))
         return Answer(
             text=text,
-            citations=[Citation(source_doc=c.doc_id, source_section=c.section) for c in chunks],
+            citations=[
+                Citation(
+                    source_doc=c.doc_id,
+                    source_section=c.section,
+                    title=c.title or c.doc_id,
+                    excerpt=c.text,
+                )
+                for c in chunks
+            ],
         )
 
     def _route(self, offer_id: str, question: str) -> tuple[HandoffTarget, str]:
@@ -145,17 +168,15 @@ class QA:
                     return target, f"Routed to {target.department} ({score:.2f} match)."
         return handoff_target(offer_id), "No confident match in the offer packet."
 
-    def _date_context(self, offer_id: str, as_of: date | None = None) -> str | None:
+    def _date_context(self, start_date: date | None, as_of: date | None = None) -> str | None:
         """Plain-language lines resolving the offer packet's start-date-relative
         phrasing into a concrete date (NOTES.md §15) and giving T-minus-banded
-        guidance on how urgently to frame it (§16). None for offer_ids with no known
-        start date (e.g. the shared-company-only fallback) — nothing to resolve or
-        band without one."""
-        info = offer_info(offer_id)
-        if info is None:
+        guidance on how urgently to frame it (§16). None when the caller has no known
+        start date to give (§19) — nothing to resolve or band without one."""
+        if start_date is None:
             return None
         today = as_of or date.today()
-        delta = (info.start_date - today).days
+        delta = (start_date - today).days
         if delta > 0:
             timing = f"in {delta} days"
         elif delta == 0:
@@ -164,5 +185,5 @@ class QA:
             timing = f"{-delta} days ago"
         return (
             f"Today's date is {today.isoformat()}. This candidate's start date is "
-            f"{info.start_date.isoformat()}, which is {timing}. {_tminus_guidance(delta)}"
+            f"{start_date.isoformat()}, which is {timing}. {_tminus_guidance(delta)}"
         )
