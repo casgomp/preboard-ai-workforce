@@ -53,15 +53,29 @@ present — no separate "prod mode" flag.
 ## Running the full stack (frontend + Python)
 
 ```bash
+make install   # pip install + npm install, once
+make dev        # both processes together; Ctrl-C stops both
+```
+
+Or run them separately (equivalent to `make dev`):
+```bash
 uvicorn server:app --reload           # Python brain, :8000
 cd frontend && npm install && npm run dev   # Next.js app, prints its own port
 ```
+
+If port 8000 is already taken locally, run `make dev PORT=8010` (and set
+`PYTHON_API_URL=http://localhost:8010` in `frontend/.env` to match).
 
 Log in as a candidate (`anna.mueller@dayone.demo` / `Welcome5!`, see
 `frontend/services/auth/session.ts` for the full demo account list) and ask a
 question — `frontend/app/api/documents/ask/route.ts` forwards it to `server.py`
 server-to-server, not from the browser, so `PYTHON_API_URL` in `frontend/.env` is a
-plain `http://localhost:8000`, no CORS-facing concerns.
+plain `http://localhost:8000`, no CORS-facing concerns. Log in as HR
+(`sarah.weber@dayone.demo` / `PeopleOps!`) to see the "Knowledge gaps" panel.
+
+Other `make` targets: `make test` (both test suites), `make ingest` (re-ingest
+`data/*.md` into Unity Catalog), `make deploy` (the Streamlit fallback app to
+Databricks Apps).
 
 ## Auth
 
