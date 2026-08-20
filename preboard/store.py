@@ -3,6 +3,13 @@
 PR1a stand-in for the eventual Unity Catalog SQL table (NOTES.md stack line): same
 column shape, backed by local SQLite so the loop runs without any Databricks
 connection. Swapping the backend later is a new class behind the same two methods.
+
+`department` (PR9/NOTES.md §18) records which team `QA._route` handed a miss off to,
+so `gap_report.py` can roll misses up by department, not just by question text. New
+column, nullable — added via `ALTER TABLE` after `CREATE TABLE IF NOT EXISTS` so an
+existing `misses.db` from before this column existed still opens without migrating by
+hand; `CREATE TABLE IF NOT EXISTS` alone wouldn't add a column to an already-existing
+table.
 """
 from __future__ import annotations
 
@@ -18,7 +25,8 @@ CREATE TABLE IF NOT EXISTS misses (
     offer_id TEXT NOT NULL,
     question TEXT NOT NULL,
     top_score REAL NOT NULL,
-    logged_at TEXT NOT NULL
+    logged_at TEXT NOT NULL,
+    department TEXT
 )
 """
 
@@ -29,6 +37,7 @@ class Miss:
     question: str
     top_score: float
     logged_at: str
+    department: str | None
 
 
 class MissLog:
@@ -43,20 +52,27 @@ class MissLog:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         with self._lock:
             self._conn.execute(_SCHEMA)
+            try:
+                self._conn.execute("ALTER TABLE misses ADD COLUMN department TEXT")
+            except sqlite3.OperationalError:
+                pass  # already has it — either CREATE TABLE just added it, or a prior run did
             self._conn.commit()
 
-    def log_miss(self, offer_id: str, question: str, top_score: float) -> None:
+    def log_miss(
+        self, offer_id: str, question: str, top_score: float, department: str | None = None
+    ) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT INTO misses (offer_id, question, top_score, logged_at) VALUES (?, ?, ?, ?)",
-                (offer_id, question, top_score, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO misses (offer_id, question, top_score, logged_at, department) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (offer_id, question, top_score, datetime.now(timezone.utc).isoformat(), department),
             )
             self._conn.commit()
 
     def all_misses(self) -> list[Miss]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT offer_id, question, top_score, logged_at FROM misses ORDER BY id"
+                "SELECT offer_id, question, top_score, logged_at, department FROM misses ORDER BY id"
             ).fetchall()
         return [Miss(*row) for row in rows]
 

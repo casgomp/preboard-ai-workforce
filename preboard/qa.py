@@ -117,8 +117,8 @@ class QA:
         top_score = top.score if top else 0.0
 
         if top is None or top_score < self._confidence_threshold:
-            self._miss_log.log_miss(offer_id, question, top_score)
             target, reason = self._route(offer_id, question)
+            self._miss_log.log_miss(offer_id, question, top_score, department=target.department)
             return Handoff(target=target, reason=reason)
 
         supporting = [

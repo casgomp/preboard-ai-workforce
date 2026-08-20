@@ -172,6 +172,27 @@ def test_falls_back_to_recruiter_when_router_score_is_below_router_threshold(tmp
     assert result.target.department is None
 
 
+def test_routed_handoff_logs_the_department_on_the_miss(tmp_path):
+    """Regression: department must be routed *before* logging the miss, not after
+    (NOTES.md §18) — otherwise the miss row is written with no department to roll up
+    by, even though the returned Handoff itself carries one."""
+    qa = _qa_with_router(tmp_path)
+
+    qa.ask("jordan-rivera", "Can I expense a bike?")
+
+    misses = qa._miss_log.all_misses()
+    assert misses[0].department == "Payroll & Benefits"
+
+
+def test_unrouted_miss_is_logged_with_no_department(tmp_path):
+    qa = _qa_with_router(tmp_path)
+
+    qa.ask("jordan-rivera", "What's your favorite pizza topping?")
+
+    misses = qa._miss_log.all_misses()
+    assert misses[0].department is None
+
+
 def test_falls_back_to_recruiter_when_no_router_configured(qa):
     result = qa.ask(OFFER_ID, "What's my manager's favorite coffee order?")
 

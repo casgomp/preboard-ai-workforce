@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from preboard.auth import InvalidToken, verify_token  # noqa: E402
-from preboard.gap_report import gap_report  # noqa: E402
+from preboard.gap_report import department_gap_report, gap_report  # noqa: E402
 from preboard.handoff import handoff_target  # noqa: E402
 from preboard.offers import offer_info  # noqa: E402
 from preboard.qa import QA, Answer, Handoff  # noqa: E402
@@ -72,14 +72,37 @@ def show_gap_report() -> None:
     once deployed (NOTES.md §15)."""
     st.title("preboard — gap report")
     st.caption("Aggregated across all candidates; no per-cohort breakdown (NOTES.md §2).")
-    entries = gap_report(MissLog(DB_PATH))
-    if not entries:
+    miss_log = MissLog(DB_PATH)
+
+    dept_entries = department_gap_report(miss_log)
+    if not dept_entries:
         st.info("No misses logged yet.")
         return
+
+    st.subheader("By department")
+    st.caption("Which team's docs need the most work (PR9/NOTES.md §18).")
+    st.dataframe(
+        [
+            {
+                "department": d.department,
+                "misses": d.count,
+                "distinct questions": d.distinct_questions,
+                "distinct offers": d.distinct_offers,
+                "last seen": d.last_seen,
+            }
+            for d in dept_entries
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("By question")
+    entries = gap_report(miss_log)
     st.dataframe(
         [
             {
                 "question": e.example_question,
+                "department": e.department or "-",
                 "count": e.count,
                 "distinct offers": e.distinct_offers,
                 "last seen": e.last_seen,

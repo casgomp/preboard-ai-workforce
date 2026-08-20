@@ -67,12 +67,8 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
 - **`preboard/offers.py` start dates are hardcoded, same stub shape as `handoff.py`'s
   target map** – fine for two demo candidates. TRIGGER: n/a for this project's scope;
   a real version reads start date from whatever system issues the offer.
-- **Gap report by department (B5)** – now that handoffs carry a department (§17),
-  `gap_report.py`/the `?view=gaps` view could group misses by routed department, not
-  just aggregate/rank by question text — this is what makes a systemic gap ("everyone
-  asks Payroll about bikes and nobody wrote it down") visible on stage. TRIGGER: time
-  remains after the core routing loop is solid; ~30 min, mostly `GapEntry` gaining a
-  `department` field and one more `st.dataframe` column.
+- **Gap report by department**: TRIGGER FIRED, shipped in §18 (PR9) —
+  `department_gap_report`, `?view=gaps`'s "By department" table.
 - **`uc_corpus.ingest` globs `data/*.md`, so `directory.md` gets ingested as
   offer_id="directory" rows if UC is re-ingested** – harmless (nothing queries UC with
   that offer_id; `routing.py`'s `DirectorySource` reads the local file directly, not
@@ -154,6 +150,14 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   router never fired against the real endpoint until probed and given its own
   threshold. Verified live: "Can I expense a bike?" → Payroll & Benefits, "My laptop
   never arrived" → IT & Equipment. See §17 and NOTES_ARCHIVE.md.
+- **PR9** (2026-08-20) – gap report by department: `misses` gained a `department`
+  column (`store.py`, migrated via `ALTER TABLE` so an existing `misses.db` from
+  before PR8 still opens); `department_gap_report` rolls misses up by team, shown as
+  a "By department" table above the existing per-question one in `?view=gaps` — the
+  stat that shows which team's docs need the most work, not just which question was
+  asked most. Also fixed an ordering bug from PR8: `qa.py` was logging the miss
+  *before* routing, so the department was never actually recorded even though the
+  returned `Handoff` had one. See §18 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -529,6 +533,7 @@ not just report a different date in the same neutral tone.
   laptop shipment hasn't started its lead time... everything is on track"; the same
   question at `--as-of 2026-09-11` (T-3) answered "that's already passed... it's
   likely overdue... you should reach out to them now to inquire about the status."
+  Same corpus, same retrieval, only the injected date/band guidance changed.
 
 ## §17 PR8: department-routed handoffs
 
@@ -585,4 +590,41 @@ the question instead.
   through `UnityCatalogSource` — routing doesn't go through Unity Catalog at all yet.
   `uc_corpus.ingest`'s `data/*.md` glob will pick it up as harmless, unused
   `offer_id="directory"` rows if UC is re-ingested (see §2).
-  Same corpus, same retrieval, only the injected date/band guidance changed.
+
+## §18 PR9: gap report by department
+
+§17 made handoffs carry a department. This makes the miss log itself carry it too, so
+the gap report can answer "which team's docs need the most work", not just "which
+question gets asked most" — the stat worth putting on stage, since a single
+department dominating the rollup is a concrete, fixable finding ("Payroll's docs are
+missing the bike-benefit answer"), not just a count.
+
+- **`store.py`**: `misses` gains a nullable `department TEXT` column, added via
+  `ALTER TABLE ... ADD COLUMN` after `CREATE TABLE IF NOT EXISTS` (wrapped in
+  `try/except sqlite3.OperationalError` for the case the column already exists) so an
+  existing `misses.db` from before this PR opens without a manual migration —
+  verified directly against this project's own `misses.db` (had 3 pre-PR9 rows) and
+  via `test_opens_a_database_created_before_the_department_column_existed`, which
+  builds a pre-PR9 schema by hand.
+  `MissLog.log_miss` gains an optional `department: str | None = None` parameter.
+- **Real ordering bug found while wiring this up**: §17's `QA.ask` logged the miss
+  *before* calling `self._route(...)`, so `department` had nothing to pass at
+  log-time even though the `Handoff` returned a moment later did carry one — the
+  live app's own `?view=gaps` would have shown every miss as "Unrouted" forever,
+  contradicting §17's own "verified live" claim about routing working. `qa.py` now
+  routes first, then logs with `department=target.department`. Confirmed against the
+  live workspace: pre-fix rows in this project's `misses.db` are genuinely
+  "Unrouted" (logged before the fix existed), post-fix rows for the same "Can I
+  expense a bike?" question correctly show "Payroll & Benefits".
+- **`gap_report.department_gap_report(miss_log)`**: groups by `department`, sorting
+  by miss count descending; nullable department rows (pre-PR9 or the router's own
+  no-confident-match fallback, §17) group under `UNROUTED_LABEL = "Unrouted"` rather
+  than being dropped, so a large "Unrouted" bucket stays visible as its own signal
+  (e.g. "the router doesn't have this covered", not just silence). `gap_report`'s
+  existing per-question `GapEntry` also gained a `department` field (the mode across
+  that question's misses) so the per-question table isn't strictly worse than
+  before.
+- **`app.py`'s `?view=gaps`**: now renders two tables — "By department" (the new
+  rollup) above "By question" (unchanged content, now with a department column) —
+  not a replacement, since the per-question view still answers "what exactly are
+  people asking," which the rollup alone doesn't.
