@@ -225,6 +225,12 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   see §1.5's amendment. Team decision (2026-08-20): keep it as a Databricks App and
   adjust the pitch language rather than rehost elsewhere under time pressure; revisit
   if the pitch needs "truly no login screen" to hold literally.
+  **Session-dependent, not actually gone**: a browser already holding a Databricks
+  session (e.g. the workspace creator's own laptop) sees no login form — SSO resolves
+  silently — which can make a live demo *look* seamless. A cold device (any real
+  candidate, most judges opening the link fresh) still hits the login page. Don't pitch
+  it as "no login required" on the strength of a demo run from an already-authenticated
+  browser; that's a different, false claim from "the token scopes access to one offer."
 - **Live URL**: `https://preboard-7474653684757026.aws.databricksapps.com`. Redeploy
   with `databricks bundle deploy && databricks bundle run preboard` from the repo root
   (needs `DATABRICKS_HOST`/`DATABRICKS_TOKEN` in the shell env, e.g. `set -a; source
