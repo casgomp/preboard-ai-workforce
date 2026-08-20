@@ -116,8 +116,32 @@ class TestUnityCatalogSource:
                 (c.doc_id, c.section, c.text) for c in local_chunks
             ]
 
-    def test_unknown_offer_returns_nothing(self):
+    def test_unknown_offer_gets_only_shared_company_content(self):
+        from preboard.corpus import SHARED_DOC_ID
         from preboard.uc_corpus import UnityCatalogSource
 
         source = UnityCatalogSource(os.environ["DATABRICKS_WAREHOUSE_ID"])
-        assert source.load("nonexistent-offer") == []
+        chunks = source.load("nonexistent-offer")
+
+        assert chunks
+        assert all(c.doc_id == SHARED_DOC_ID for c in chunks)
+
+
+def test_embedding_batches_larger_than_the_endpoint_limit():
+    """Regression: databricks-gte-large-en hangs (no error, never returns) on a single
+    query() call batching ~20+ inputs — reproduced with both real chunk text and
+    trivial short strings, so it's an item-count limit, not a payload-size one. Found
+    when data/company.md pushed a single offer's chunk count past the threshold for
+    the first time. EmbeddingRetriever._embed must split into sub-batches
+    (MAX_EMBED_BATCH_SIZE); this test would hang indefinitely if that regressed."""
+    from preboard.corpus import Chunk
+    from preboard.embedding_retrieval import EmbeddingRetriever
+
+    class _ManyChunksSource:
+        def load(self, offer_id):
+            return [Chunk(doc_id="x", section=f"s{i}", text=f"filler text {i}") for i in range(25)]
+
+    retriever = EmbeddingRetriever(_ManyChunksSource())
+    results = retriever.retrieve("offer", "filler text 3")
+
+    assert len(results) == 25

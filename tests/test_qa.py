@@ -43,11 +43,21 @@ def test_low_confidence_hands_off_and_logs_miss(qa):
     assert "coffee" in misses[0].question
 
 
-def test_unknown_offer_id_hands_off_without_crashing(qa):
-    result = qa.ask("someone-else", "When do I start?")
+def test_unknown_offer_id_with_no_offer_specific_match_hands_off(qa):
+    result = qa.ask("someone-else", "When does my signing bonus get paid?")
 
     assert isinstance(result, Handoff)
     assert result.target.name == "People Ops"
+
+
+def test_unknown_offer_id_can_still_answer_from_shared_company_content(qa):
+    """Not a security gap: company-wide info (corpus.py's SHARED_DOC_ID) isn't
+    candidate-specific, so it's fine for it to answer even without a matching offer
+    doc — the auth boundary is verify_token(), not this fallback."""
+    result = qa.ask("someone-else", "What communication tools do we use?")
+
+    assert isinstance(result, Answer)
+    assert result.citations[0].source_doc == "company"
 
 
 class _FixedRetriever:

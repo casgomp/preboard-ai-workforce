@@ -104,6 +104,11 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   retrieval/generation. Found by adding a startup log line and reading deployed logs,
   not by any test — nothing in the suite runs inside an actual deployed app's
   environment. See §12 and NOTES_ARCHIVE.md.
+- **PR5** (2026-08-20) – `data/company.md`, shared non-employee-specific content
+  included for every candidate alongside their own offer packet (§14); README.md
+  added. Found and fixed a real endpoint hang (`databricks-gte-large-en` never
+  returns on batches of ~20+ inputs) surfaced by this being the first time a single
+  offer's merged chunk count crossed that threshold — see §14 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -359,3 +364,37 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   approach retrieves and grounds on one topical unit at a time. A future fix (not
   attempted here) would need query decomposition or multi-pass retrieval, not just a
   different threshold or more corpus content.
+
+## §14 Shared company-wide corpus, and a real endpoint hang
+
+- **`data/company.md`**: non-employee-specific content (mission/values, office
+  policy, code of conduct, IT/security basics, expense policy, holidays, L&D,
+  performance reviews, who to contact) — the kind of thing a real company hands every
+  new hire regardless of their specific offer. `corpus.py`'s `SHARED_DOC_ID = "company"`
+  is included alongside every offer's own chunks by both `LocalMarkdownSource` and
+  `UnityCatalogSource`, not instead of them. An offer id with no dedicated doc still
+  gets shared content — not a security gap, since company info isn't candidate-specific
+  and the real auth boundary is `verify_token()`, not this fallback (see updated tests
+  in `test_retrieval.py`/`test_qa.py`).
+- **Real endpoint bug found while testing this**: `databricks-gte-large-en` hangs —
+  no error, no SDK timeout, it simply never returns — on a single `query()` call
+  batching around 20+ inputs. Reproduced with both real chunk text and trivial short
+  strings ("test sentence number N" × 20), which ruled out payload size as the cause;
+  it's an item-count limit. Surfaced because `company.md` pushed a single offer's
+  merged chunk count (offer-specific + shared) past 20 for the first time — every
+  prior test and demo had stayed under it by coincidence. Fixed by sub-batching in
+  `EmbeddingRetriever._embed` (`MAX_EMBED_BATCH_SIZE = 10`); regression test
+  (`test_embedding_batches_larger_than_the_endpoint_limit`) uses a fake `ChunkSource`
+  of 25 chunks so it doesn't depend on the real corpus staying above the limit.
+  **This would have been a silent full outage of every answer** (not a wrong answer,
+  not a bad handoff — every single question hangs indefinitely) the first time a
+  real corpus grew past ~20 chunks for one offer, with no error to point at. Worth
+  remembering for any future endpoint integration: an API that hangs instead of
+  erroring on an oversized request is a real failure mode to test for, not just
+  size/rate-limit errors.
+- **Ordering gotcha**: `UnityCatalogSource`'s original `ORDER BY offer_id` put shared
+  chunks before offer-specific ones for `jordan-rivera` (alphabetically "company" <
+  "jordan-rivera") but after them for `alex-chen` ("alex-chen" < "company") —
+  inconsistent with `LocalMarkdownSource`'s fixed offer-then-shared order, and caught
+  by `test_reads_the_same_chunks_as_the_local_files` comparing the two exactly. Fixed
+  with `ORDER BY CASE WHEN offer_id = :offer_id THEN 0 ELSE 1 END, chunk_order`.

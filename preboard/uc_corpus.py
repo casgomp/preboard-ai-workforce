@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from preboard.corpus import Chunk, load_chunks
+from preboard.corpus import SHARED_DOC_ID, Chunk, load_chunks
 
 CATALOG = "workspace"
 SCHEMA = "preboard"
@@ -20,7 +20,8 @@ FULL_TABLE_NAME = f"{CATALOG}.{SCHEMA}.{TABLE}"
 
 
 class UnityCatalogSource:
-    """Reads chunks for one offer from `workspace.preboard.offer_chunks`."""
+    """Reads chunks for one offer, plus the shared company-wide doc (corpus.py's
+    SHARED_DOC_ID), from `workspace.preboard.offer_chunks`."""
 
     def __init__(self, warehouse_id: str):
         from databricks.sdk import WorkspaceClient  # noqa: PLC0415
@@ -34,10 +35,18 @@ class UnityCatalogSource:
         response = self._client.statement_execution.execute_statement(
             statement=(
                 f"SELECT doc_id, section, text FROM {FULL_TABLE_NAME} "
-                "WHERE offer_id = :offer_id ORDER BY chunk_order"
+                "WHERE offer_id = :offer_id OR offer_id = :shared_id "
+                # Offer-specific chunks before shared ones, matching LocalMarkdownSource's
+                # order — plain `ORDER BY offer_id` would put "company" before
+                # "jordan-rivera" alphabetically but after "alex-chen", an inconsistency
+                # test_reads_the_same_chunks_as_the_local_files caught.
+                "ORDER BY CASE WHEN offer_id = :offer_id THEN 0 ELSE 1 END, chunk_order"
             ),
             warehouse_id=self._warehouse_id,
-            parameters=[StatementParameterListItem(name="offer_id", value=offer_id, type="STRING")],
+            parameters=[
+                StatementParameterListItem(name="offer_id", value=offer_id, type="STRING"),
+                StatementParameterListItem(name="shared_id", value=SHARED_DOC_ID, type="STRING"),
+            ],
             wait_timeout="30s",
         )
         rows = response.result.data_array if response.result else None

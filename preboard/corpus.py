@@ -17,21 +17,31 @@ class Chunk:
     text: str
 
 
+# Company-wide info (benefits baseline, policies, culture — not tied to any one offer)
+# lives in a doc under this id and is included alongside every offer's own chunks, not
+# instead of them. Not itself a real offer_id — nothing should ever auth into it.
+SHARED_DOC_ID = "company"
+
+
 class ChunkSource(Protocol):
     def load(self, offer_id: str) -> list[Chunk]: ...
 
 
 class LocalMarkdownSource:
-    """Reads `<corpus_dir>/<offer_id>.md`, one chunk per `## ` section."""
+    """Reads `<corpus_dir>/<offer_id>.md` plus `<corpus_dir>/company.md`, one chunk
+    per `## ` section."""
 
     def __init__(self, corpus_dir: Path):
         self._corpus_dir = corpus_dir
 
     def load(self, offer_id: str) -> list[Chunk]:
-        doc_path = self._corpus_dir / f"{offer_id}.md"
-        if not doc_path.exists():
-            return []
-        return load_chunks(doc_path)
+        doc_ids = [offer_id] if offer_id == SHARED_DOC_ID else [offer_id, SHARED_DOC_ID]
+        chunks: list[Chunk] = []
+        for doc_id in doc_ids:
+            doc_path = self._corpus_dir / f"{doc_id}.md"
+            if doc_path.exists():
+                chunks.extend(load_chunks(doc_path))
+        return chunks
 
 
 def load_chunks(doc_path: Path) -> list[Chunk]:

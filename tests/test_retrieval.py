@@ -23,11 +23,22 @@ def test_unrelated_question_scores_below_threshold():
     assert not results or results[0].score < CONFIDENCE_THRESHOLD
 
 
-def test_unknown_offer_returns_nothing():
+def test_unknown_offer_still_surfaces_shared_company_content():
+    """Company-wide info (corpus.py's SHARED_DOC_ID) isn't candidate-specific, so it's
+    reachable even for an offer id with no dedicated doc — unlike offer-specific
+    content, which stays properly scoped (see test_candidates_only_retrieve_their_own_corpus)."""
     retriever = KeywordRetriever(SOURCE)
-    results = retriever.retrieve("nonexistent-offer", "When do I start?")
+    results = retriever.retrieve("nonexistent-offer", "What communication tools do we use?")
 
-    assert results == []
+    assert results
+    assert results[0].chunk.doc_id == "company"
+
+
+def test_unknown_offer_has_no_offer_specific_content_to_leak():
+    retriever = KeywordRetriever(SOURCE)
+    results = retriever.retrieve("nonexistent-offer", "When does my signing bonus get paid?")
+
+    assert all(r.chunk.doc_id == "company" for r in results)
 
 
 def test_single_incidental_word_match_does_not_count_as_confident():

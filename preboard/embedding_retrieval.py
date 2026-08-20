@@ -27,6 +27,13 @@ EMBEDDING_CONFIDENCE_THRESHOLD = 0.62
 
 DEFAULT_ENDPOINT = "databricks-gte-large-en"
 
+# databricks-gte-large-en hangs (no error, no timeout from the SDK — just never
+# returns) on a single query() call batching ~20+ inputs, reproduced with both real
+# chunk text and trivial short strings, so it's an item-count limit, not a payload-size
+# one. 10 is comfortably under that. Found when adding data/company.md pushed a single
+# offer's chunk count past the threshold for the first time (NOTES.md §14).
+MAX_EMBED_BATCH_SIZE = 10
+
 
 def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
@@ -51,8 +58,12 @@ class EmbeddingRetriever:
         self._embeddings_by_offer: dict[str, list[list[float]]] = {}
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
-        response = self._client.serving_endpoints.query(name=self._endpoint_name, input=texts)
-        return [item.embedding for item in response.data]
+        embeddings: list[list[float]] = []
+        for i in range(0, len(texts), MAX_EMBED_BATCH_SIZE):
+            batch = texts[i : i + MAX_EMBED_BATCH_SIZE]
+            response = self._client.serving_endpoints.query(name=self._endpoint_name, input=batch)
+            embeddings.extend(item.embedding for item in response.data)
+        return embeddings
 
     def _load_offer(self, offer_id: str) -> None:
         if offer_id in self._chunks_by_offer:

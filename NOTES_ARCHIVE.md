@@ -198,3 +198,38 @@ needing to SSO into the app first.
 an actual deployed Databricks App's environment. Anything gated on distinguishing
 local-dev auth from deployed-app auth needs to be checked against real deployed logs,
 not assumed correct because local tests pass.
+
+## PR5 — shared company corpus, README, and a real endpoint hang (2026-08-20)
+
+**Why:** User request: add a concise README, and generate non-employee-specific
+company information a real preboarding buffer would hand any new hire regardless of
+their specific offer.
+
+**Design:** `data/company.md` — mission/values, office policy, code of conduct,
+IT/security, expenses, holidays, L&D, performance reviews, who to contact.
+`corpus.py`'s `SHARED_DOC_ID` is included alongside every offer's own chunks by both
+`LocalMarkdownSource` and `UnityCatalogSource`. An offer id with no dedicated doc
+still surfaces shared content — a deliberate choice, not an oversight: company info
+isn't candidate-specific, and the real auth boundary is `verify_token()`, which this
+fallback never bypasses.
+
+**Gotchas resolved:** two, both found through direct testing rather than assumption.
+(1) `databricks-gte-large-en` hangs — no error, never returns — on a single `query()`
+batching ~20+ inputs; reproduced with both real and trivial dummy text, ruling out
+payload size as the cause. This had been sitting latent since PR1d; `company.md` was
+just the first thing to push a single offer's merged chunk count over the threshold.
+This is a materially worse failure mode than a wrong answer or a bad handoff — it's a
+silent full outage, every question hangs forever, no error to point at. Fixed with
+sub-batching (`MAX_EMBED_BATCH_SIZE = 10`) in `EmbeddingRetriever._embed`; the
+regression test uses a fake 25-chunk `ChunkSource` so it doesn't depend on the real
+corpus staying above the limit to keep testing it. (2) `UnityCatalogSource`'s plain
+`ORDER BY offer_id` put shared chunks before offer-specific ones for `jordan-rivera`
+but after them for `alex-chen` — alphabetical accident, inconsistent with
+`LocalMarkdownSource`'s fixed ordering, caught by the existing UC-vs-local comparison
+test. Fixed with a `CASE` expression forcing offer-specific chunks first regardless of
+alphabetical offer id.
+
+**Verified:** live CLI test against the real deployed stack — "how many paid company
+holidays do I get?" returned a synthesized answer citing both `company` (Company
+holidays) and `jordan-rivera` (PTO accrual) sections in one response, confirming
+multi-chunk generation (PR4) correctly spans the shared/offer-specific boundary.
