@@ -17,6 +17,12 @@ from typing import Protocol
 # happens to separate the sample corpus's in-scope and out-of-scope questions.
 CONFIDENCE_THRESHOLD = 0.2
 
+# A single incidental shared word (e.g. "manager") was enough to clear the ratio
+# threshold on an otherwise unrelated question and return a wrong answer instead of a
+# handoff. Requiring at least two overlapping content words cuts that off cheaply,
+# without pretending this scorer is a substitute for real semantic retrieval.
+MIN_OVERLAP_TOKENS = 2
+
 _STOPWORDS = {
     "a", "an", "the", "is", "are", "do", "does", "i", "my", "me", "to", "for", "of",
     "on", "in", "at", "and", "or", "will", "when", "what", "how", "can", "it", "be",
@@ -93,9 +99,10 @@ class KeywordRetriever:
             if not c_tokens:
                 continue
             overlap = q_tokens & c_tokens
+            if len(overlap) < min(MIN_OVERLAP_TOKENS, len(q_tokens)):
+                continue
             score = len(overlap) / len(q_tokens)
-            if score > 0:
-                results.append(RetrievedChunk(chunk=chunk, score=score))
+            results.append(RetrievedChunk(chunk=chunk, score=score))
 
         results.sort(key=lambda r: r.score, reverse=True)
         return results

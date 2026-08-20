@@ -35,12 +35,16 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   loop is demoable end to end.
 - **German-first corpus** – FM endpoint handles the language; the corpus and citations
   must match. TRIGGER: the demo audience needs German, or the source docs are German.
-- **Keyword-overlap retrieval gives false positives on common words** – e.g. "your" and
-  incidental proper nouns/dates that recur across sections inflate overlap scores
-  regardless of topic (hit twice while writing PR1a's tests, both fixed by widening the
-  stopword list, not by a structural fix). Real vector search should not have this
-  failure mode, but until PR1b lands, widen `_STOPWORDS` in `retrieval.py` when it
-  recurs rather than trusting the threshold blindly. TRIGGER: PR1b (real retrieval).
+- **Keyword-overlap retrieval gives false positives on common/incidental words** – hit
+  three times now: "your" and recurring proper nouns/dates (fixed via `_STOPWORDS`,
+  PR1a), and a single shared content word ("manager") clearing the ratio threshold and
+  returning a wrong answer instead of a handoff (fixed via `MIN_OVERLAP_TOKENS`, PR2).
+  Both are patches on a scorer that has no real notion of confidence, not a structural
+  fix — expect more of these until PR1d lands real vector search. TRIGGER: PR1d.
+- **Gap report groups by exact normalized text, not semantic similarity** – two
+  differently-phrased versions of the same missed question count as separate rows.
+  Fine for a small hackathon demo corpus; would undercount real gaps at scale. TRIGGER:
+  PR1d (once embeddings exist, cluster misses by similarity instead of exact match).
 
 ## §3 Shipped
 
@@ -54,6 +58,9 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   (not just unit tests): grounded answer with citation, low-confidence handoff, and
   invalid-token rejection all confirmed rendering correctly. Caught and fixed a real
   concurrency bug in the process — see NOTES_ARCHIVE.md.
+- **PR2** – gap report, ranked by frequency, aggregated across all offers (never
+  per-cohort — see invariant discussion in §2). Found and fixed a second retrieval
+  false-positive while generating demo data for it. See NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -70,7 +77,7 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
    code change.
 4. PR1d – swap in real Unity Catalog + vector search retrieval. Blocked on workspace
    credentials.
-5. PR2 – gap report.
+5. PR2 – gap report, aggregated across all past candidates, ranked by frequency.
 
 First slice cut line: if the loop in PR1a isn't demoable by end of day 1, PR1b's real
 retrieval/auth and PR2 are both dropped from the pitch and named as future work instead.
@@ -117,3 +124,15 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   thread. Also note for future Streamlit hot-reload: editing a module *other than*
   `app.py` doesn't always bust `st.cache_resource` — restart the process, don't trust
   the auto-reload, when a fix doesn't seem to take.
+
+## §8 PR2 decisions
+
+- **Grouping**: normalized exact-text match (lowercase, trim, collapse whitespace,
+  strip trailing `?!.`), not semantic clustering — no embedding model exists yet
+  (PR1d). Documented as a known undercount, not silently accepted.
+- **Aggregation**: always across every `offer_id` in the log, by construction — the
+  report has no per-offer or per-cohort view, so it can't accidentally be pointed at a
+  near-empty, non-anonymous cohort (see §2's gap-report entry).
+- **Retrieval fix, found while seeding demo data for this report**: a single shared
+  content word ("manager") was enough to clear `CONFIDENCE_THRESHOLD` and return a
+  wrong answer instead of a handoff. Added `MIN_OVERLAP_TOKENS = 2` in `retrieval.py`.

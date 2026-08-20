@@ -28,6 +28,16 @@ def test_unknown_offer_returns_nothing():
     assert results == []
 
 
+def test_single_incidental_word_match_does_not_count_as_confident():
+    """Regression: 'manager' alone matched alex-chen's start-date section and returned
+    an unrelated answer instead of a handoff — found by manually driving the app in a
+    browser while generating data for the PR2 gap report, not by unit tests."""
+    retriever = KeywordRetriever(CORPUS_DIR)
+    results = retriever.retrieve("alex-chen", "What's my manager's favorite coffee order?")
+
+    assert not results
+
+
 def test_candidates_only_retrieve_their_own_corpus():
     retriever = KeywordRetriever(CORPUS_DIR)
 

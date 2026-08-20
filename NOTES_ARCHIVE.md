@@ -59,3 +59,23 @@ Streamlit session.
 
 **Deferred, unlocked by this merge:** PR1d (real UC + vector search retrieval) is the
 only piece left before the pitch's full architecture is real rather than stubbed.
+
+## PR2 – gap report (2026-08-20)
+
+**Why:** The miss log has been writing since PR1a but nothing read it back. The trigger
+in NOTES.md §2 fired once the loop was demoable end to end (PR1a).
+
+**Design:** Ranks misses by frequency, grouped by normalized exact text (case,
+whitespace, trailing punctuation only — no semantic clustering, no embedding model
+exists yet). Always aggregates across every `offer_id` in the log; there's no
+per-cohort view, so it structurally can't be pointed at a near-empty, re-identifying
+cohort. `gap_report()` is a pure function over `MissLog.all_misses()`.
+
+**Gotchas resolved:** generating demo data for the report reproduced the same class of
+bug as PR1a's stopword issue, one level worse — a single shared content word
+("manager") cleared the confidence ratio on an unrelated question for a second
+candidate and returned a wrong answer instead of a handoff, which undermines invariant
+§1.4 more directly than a stopword miss does. Fixed with a minimum-overlap-count floor
+(`MIN_OVERLAP_TOKENS = 2`) alongside the ratio threshold; regression test added. Same
+root cause as before — this scorer has no real notion of confidence — and the same
+fix pattern: patch cheaply, log it, defer the structural fix to PR1d.
