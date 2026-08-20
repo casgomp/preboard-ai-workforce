@@ -2,6 +2,10 @@
 
 PR1a stub: one recruiter per hardcoded offer. Real version looks this up per-offer from
 whatever system owns candidate/recruiter pairings.
+
+`department` (PR8/NOTES.md §17) is set when `routing.Router` matched the question to a
+directory entry; `None` for the plain per-offer recruiter fallback below, which isn't
+department-specific.
 """
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ from dataclasses import dataclass
 class HandoffTarget:
     name: str
     contact: str
+    department: str | None = None
 
 
 _STUB_TARGETS = {

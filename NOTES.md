@@ -67,6 +67,17 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
 - **`preboard/offers.py` start dates are hardcoded, same stub shape as `handoff.py`'s
   target map** – fine for two demo candidates. TRIGGER: n/a for this project's scope;
   a real version reads start date from whatever system issues the offer.
+- **Gap report by department (B5)** – now that handoffs carry a department (§17),
+  `gap_report.py`/the `?view=gaps` view could group misses by routed department, not
+  just aggregate/rank by question text — this is what makes a systemic gap ("everyone
+  asks Payroll about bikes and nobody wrote it down") visible on stage. TRIGGER: time
+  remains after the core routing loop is solid; ~30 min, mostly `GapEntry` gaining a
+  `department` field and one more `st.dataframe` column.
+- **`uc_corpus.ingest` globs `data/*.md`, so `directory.md` gets ingested as
+  offer_id="directory" rows if UC is re-ingested** – harmless (nothing queries UC with
+  that offer_id; `routing.py`'s `DirectorySource` reads the local file directly, not
+  UC) but not intentional. TRIGGER: routing moves to UC-backed lookup — filter the
+  glob or give directory routing its own table then, not before.
 
 ## §3 Shipped
 
@@ -134,6 +145,15 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   now") at T-3, verified against the real FM endpoint. Added `--as-of`/`?as_of=` demo
   override so this is showable without waiting real days between the two answers.
   See §16 and NOTES_ARCHIVE.md.
+- **PR8** (2026-08-20) – department-routed handoffs: a low-confidence question now
+  routes to whichever team's `data/directory.md` entry it best matches (`routing.py`,
+  a `HandoffTarget.department` field), instead of always the same one recruiter per
+  offer — falls back to the recruiter when no department is confident. Found and
+  fixed a real threshold-reuse bug: `EMBEDDING_CONFIDENCE_THRESHOLD` (tuned for
+  offer-packet text) was silently too high for the directory's short blurbs, so the
+  router never fired against the real endpoint until probed and given its own
+  threshold. Verified live: "Can I expense a bike?" → Payroll & Benefits, "My laptop
+  never arrived" → IT & Equipment. See §17 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -509,4 +529,60 @@ not just report a different date in the same neutral tone.
   laptop shipment hasn't started its lead time... everything is on track"; the same
   question at `--as-of 2026-09-11` (T-3) answered "that's already passed... it's
   likely overdue... you should reach out to them now to inquire about the status."
+
+## §17 PR8: department-routed handoffs
+
+Every low-confidence question had always handed off to the same one stub recruiter
+per offer (`handoff.py`, unchanged since PR1a), regardless of what the question was
+about — a bike-expense question and a background-check question went to the same
+person. This routes to the department whose `data/directory.md` entry best matches
+the question instead.
+
+- **`DirectorySource` reuses `ChunkSource`'s shape but ignores `offer_id`** — the
+  directory is one global document, not per-offer — which lets `Router` wrap
+  `KeywordRetriever`/`EmbeddingRetriever` unmodified rather than a second scoring
+  implementation. `Router.route(question)` returns `(HandoffTarget, score) | None`;
+  `_target_from_chunk` parses a `Contact: <email>` line out of the matched chunk's
+  text to build the target, with the department name as both `HandoffTarget.name` and
+  the new `HandoffTarget.department` field (`None` for the plain per-offer fallback).
+- **`QA._route`**: on a low-confidence question, tries the configured `router` first
+  (if `score >= router_threshold`) and falls back to `handoff_target(offer_id)`
+  otherwise — same never-guess-past-confidence shape as invariant §1.4, applied to
+  *which human* gets the handoff, not just whether to answer. `router`/
+  `router_threshold` are optional constructor args (default `None`/`0.0`), so every
+  existing `QA(...)` call site and test is unaffected.
+- **`wiring.build_router(corpus_dir)`** mirrors `build_retriever`'s credential check
+  (embedding-scored router when Databricks credentials are configured, keyword-scored
+  otherwise) and is wired into both `app.py` and `cli.py`.
+- **Real bug found by testing against the live endpoint, not by the unit tests**: the
+  first version reused `EMBEDDING_CONFIDENCE_THRESHOLD` (0.62) for the router. Every
+  routing attempt against the real endpoint fell back to the generic recruiter —
+  the router was silently never firing. Probed directly: 5 questions that *should*
+  route scored 0.470-0.637 against their correct department; 3 genuinely unrelated
+  ones scored 0.445-0.501. Two findings from that probe:
+  - **The offer-packet threshold doesn't transfer**: directory entries are short,
+    generic department blurbs, not detailed narrative offer-packet text, so even a
+    *correct* top-1 match scores lower than the sample `EMBEDDING_CONFIDENCE_THRESHOLD`
+    was calibrated against (§9).
+  - **The confident/unconfident ranges overlap here too** (0.470-0.637 vs.
+    0.445-0.501), the same structural shape as §13's broad-question finding — but the
+    call is the opposite of §13's, because the stakes are different. §13 kept a
+    conservative threshold because a wrong grounded *answer* is invariant §1.4's real
+    failure mode: the candidate believes something false. A wrong *department* is
+    low-cost — a human on the receiving end reroutes it — so `ROUTER_EMBEDDING_
+    CONFIDENCE_THRESHOLD = 0.45` (routing.py) is set to route more often, accepting
+    some misroutes (e.g. "Will I get stock options?" would confidently route to
+    People Ops) in exchange for the bike question actually reaching Payroll instead of
+    always the recruiter. Small sample, same caveat as §9 — revisit if real usage
+    shows misrouting is more disruptive than assumed here.
+- **Verified against the real embeddings endpoint after the fix**: "Can I expense a
+  bike?" (jordan-rivera) → Payroll & Benefits, 0.47 match; "My laptop never arrived,
+  who do I contact?" (alex-chen) → IT & Equipment, 0.58 match.
+- **Deferred (B5, §2)**: gap report grouped by routed department, not just question
+  text — the next ~30 min of work, and what turns this into a demoable "here's what
+  Payroll doesn't have written down" moment rather than just a UX nicety.
+- **Scope note**: `data/directory.md` is read locally by `DirectorySource`, not
+  through `UnityCatalogSource` — routing doesn't go through Unity Catalog at all yet.
+  `uc_corpus.ingest`'s `data/*.md` glob will pick it up as harmless, unused
+  `offer_id="directory"` rows if UC is re-ingested (see §2).
   Same corpus, same retrieval, only the injected date/band guidance changed.

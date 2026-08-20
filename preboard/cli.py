@@ -18,7 +18,12 @@ load_dotenv()
 
 from preboard.auth import InvalidToken, issue_token, verify_token  # noqa: E402
 from preboard.qa import QA, Answer, Handoff  # noqa: E402
-from preboard.wiring import build_generator, build_retriever, has_databricks_credentials  # noqa: E402
+from preboard.wiring import (  # noqa: E402
+    build_generator,
+    build_retriever,
+    build_router,
+    has_databricks_credentials,
+)
 from preboard.store import MissLog  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -61,11 +66,14 @@ def main() -> None:
         parser.error("one of --token or --offer-id is required")
 
     retriever, confidence_threshold = build_retriever(args.corpus_dir)
+    router, router_threshold = build_router(args.corpus_dir)
     qa = QA(
         retriever=retriever,
         generator=build_generator(),
         miss_log=MissLog(args.db),
         confidence_threshold=confidence_threshold,
+        router=router,
+        router_threshold=router_threshold,
     )
 
     mode = "real Databricks FM + embeddings" if has_databricks_credentials() else "local stub"
@@ -85,7 +93,8 @@ def main() -> None:
             print(f"{result.text}\n\n(source: {sources})")
         elif isinstance(result, Handoff):
             print("I'm not confident enough to answer that from the offer packet.")
-            print(f"Reaching out to {result.target.name} ({result.target.contact}) on your behalf.")
+            who = f"the {result.target.department} team" if result.target.department else result.target.name
+            print(f"Reaching out to {who} ({result.target.contact}) on your behalf. [{result.reason}]")
 
 
 if __name__ == "__main__":

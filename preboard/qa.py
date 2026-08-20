@@ -13,6 +13,7 @@ from preboard.generation import Generator
 from preboard.handoff import HandoffTarget, handoff_target
 from preboard.offers import offer_info
 from preboard.retrieval import Retriever
+from preboard.routing import Router
 from preboard.store import MissLog
 
 # A broad question ("what do I need to do before I start?") can genuinely span several
@@ -83,15 +84,27 @@ AnswerResult = Answer | Handoff
 class QA:
     """`confidence_threshold` is a property of whichever retriever's scoring scheme is
     wired in (keyword-overlap ratio vs. cosine similarity aren't comparable numbers),
-    so callers pass it explicitly rather than QA importing one retriever's constant."""
+    so callers pass it explicitly rather than QA importing one retriever's constant.
+
+    `router`/`router_threshold` (PR8/NOTES.md §17) are optional — `None` keeps the
+    plain per-offer `handoff_target` fallback, so existing callers/tests that only
+    pass the required five arguments are unaffected."""
 
     def __init__(
-        self, retriever: Retriever, generator: Generator, miss_log: MissLog, confidence_threshold: float
+        self,
+        retriever: Retriever,
+        generator: Generator,
+        miss_log: MissLog,
+        confidence_threshold: float,
+        router: Router | None = None,
+        router_threshold: float = 0.0,
     ):
         self._retriever = retriever
         self._generator = generator
         self._miss_log = miss_log
         self._confidence_threshold = confidence_threshold
+        self._router = router
+        self._router_threshold = router_threshold
 
     def ask(self, offer_id: str, question: str, as_of: date | None = None) -> AnswerResult:
         """`as_of` overrides "today" for the date/T-minus context injected into the
@@ -105,10 +118,8 @@ class QA:
 
         if top is None or top_score < self._confidence_threshold:
             self._miss_log.log_miss(offer_id, question, top_score)
-            return Handoff(
-                target=handoff_target(offer_id),
-                reason="No confident match in the offer packet.",
-            )
+            target, reason = self._route(offer_id, question)
+            return Handoff(target=target, reason=reason)
 
         supporting = [
             r for r in results[:MAX_SUPPORTING_CHUNKS] if r.score >= top_score * SUPPORTING_SCORE_RATIO
@@ -120,6 +131,19 @@ class QA:
             text=text,
             citations=[Citation(source_doc=c.doc_id, source_section=c.section) for c in chunks],
         )
+
+    def _route(self, offer_id: str, question: str) -> tuple[HandoffTarget, str]:
+        """Routes to the best-matching department (PR8/NOTES.md §17) when a router is
+        configured and confident; falls back to the plain per-offer recruiter
+        otherwise — same "never guess" default as invariant §1.4 applied to routing
+        itself, not just answering."""
+        if self._router is not None:
+            routed = self._router.route(question)
+            if routed is not None:
+                target, score = routed
+                if score >= self._router_threshold:
+                    return target, f"Routed to {target.department} ({score:.2f} match)."
+        return handoff_target(offer_id), "No confident match in the offer packet."
 
     def _date_context(self, offer_id: str, as_of: date | None = None) -> str | None:
         """Plain-language lines resolving the offer packet's start-date-relative

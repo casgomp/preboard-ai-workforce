@@ -20,7 +20,12 @@ from preboard.gap_report import gap_report  # noqa: E402
 from preboard.handoff import handoff_target  # noqa: E402
 from preboard.offers import offer_info  # noqa: E402
 from preboard.qa import QA, Answer, Handoff  # noqa: E402
-from preboard.wiring import build_generator, build_retriever, has_databricks_credentials  # noqa: E402
+from preboard.wiring import (  # noqa: E402
+    build_generator,
+    build_retriever,
+    build_router,
+    has_databricks_credentials,
+)
 from preboard.store import MissLog  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -37,11 +42,14 @@ print(f"[preboard] real Databricks components: {has_databricks_credentials()}")
 @st.cache_resource
 def get_qa() -> QA:
     retriever, confidence_threshold = build_retriever(CORPUS_DIR)
+    router, router_threshold = build_router(CORPUS_DIR)
     return QA(
         retriever=retriever,
         generator=build_generator(),
         miss_log=MissLog(DB_PATH),
         confidence_threshold=confidence_threshold,
+        router=router,
+        router_threshold=router_threshold,
     )
 
 
@@ -143,10 +151,14 @@ def main() -> None:
             sources = "; ".join(f"{c.source_doc} — {c.source_section}" for c in result.citations)
             reply = f"{result.text}\n\n*Source: {sources}*"
         elif isinstance(result, Handoff):
+            who = (
+                f"the **{result.target.department}** team"
+                if result.target.department
+                else f"**{result.target.name}**"
+            )
             reply = (
-                "I'm not confident enough to answer that from your offer packet, so I've flagged it "
-                f"for **{result.target.name}** ({result.target.contact}), who will follow up with you "
-                "directly."
+                f"I'm not confident enough to answer that from your offer packet, so I've flagged it "
+                f"for {who} ({result.target.contact}), who will follow up with you directly."
             )
         else:
             reply = "Something went wrong."

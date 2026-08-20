@@ -6,6 +6,7 @@ from preboard.corpus import Chunk, LocalMarkdownSource
 from preboard.generation import StubGenerator
 from preboard.qa import QA, Answer, Handoff, _tminus_guidance, _TMINUS_OVERDUE_GUIDANCE
 from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever, RetrievedChunk
+from preboard.routing import DirectorySource, Router
 from preboard.store import MissLog
 
 CORPUS_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -132,3 +133,47 @@ def test_date_context_includes_start_date_and_tminus_guidance(qa):
 
 def test_date_context_is_none_for_an_offer_with_no_known_start_date(qa):
     assert qa._date_context("someone-else") is None
+
+
+def _qa_with_router(tmp_path, router_threshold=CONFIDENCE_THRESHOLD):
+    return QA(
+        retriever=_FixedRetriever([]),
+        generator=StubGenerator(),
+        miss_log=MissLog(tmp_path / "misses.db"),
+        confidence_threshold=CONFIDENCE_THRESHOLD,
+        router=Router(KeywordRetriever(DirectorySource(CORPUS_DIR))),
+        router_threshold=router_threshold,
+    )
+
+
+def test_low_confidence_question_routes_to_the_matching_department(tmp_path):
+    """Regression for the bike question (NOTES.md §17): a low-confidence question
+    should reach the right team's contact, not always the same per-offer recruiter."""
+    result = _qa_with_router(tmp_path).ask("jordan-rivera", "Can I expense a bike?")
+
+    assert isinstance(result, Handoff)
+    assert result.target.department == "Payroll & Benefits"
+    assert result.target.contact == "payroll@example.com"
+    assert "Routed to Payroll & Benefits" in result.reason
+
+
+def test_falls_back_to_recruiter_when_router_has_no_confident_match(tmp_path):
+    result = _qa_with_router(tmp_path).ask("jordan-rivera", "What's your favorite pizza topping?")
+
+    assert isinstance(result, Handoff)
+    assert result.target.department is None
+    assert result.target.name == "Priya Nandakumar"
+
+
+def test_falls_back_to_recruiter_when_router_score_is_below_router_threshold(tmp_path):
+    result = _qa_with_router(tmp_path, router_threshold=1.1).ask("jordan-rivera", "Can I expense a bike?")
+
+    assert isinstance(result, Handoff)
+    assert result.target.department is None
+
+
+def test_falls_back_to_recruiter_when_no_router_configured(qa):
+    result = qa.ask(OFFER_ID, "What's my manager's favorite coffee order?")
+
+    assert isinstance(result, Handoff)
+    assert result.target.department is None

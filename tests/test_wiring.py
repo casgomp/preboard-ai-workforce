@@ -8,9 +8,15 @@ verify the env-var logic itself, not that Databricks really injects these var na
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from preboard.wiring import has_databricks_credentials
+from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever
+from preboard.routing import Router
+from preboard.wiring import build_router, has_databricks_credentials
+
+CORPUS_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 @pytest.fixture(autouse=True)
@@ -47,3 +53,13 @@ def test_host_with_only_client_id_is_not_enough(monkeypatch):
 def test_host_alone_is_not_enough(monkeypatch):
     monkeypatch.setenv("DATABRICKS_HOST", "https://x")
     assert has_databricks_credentials() is False
+
+
+def test_build_router_without_credentials_mirrors_build_retriever():
+    """No credentials configured (clean_env, autouse) -> keyword-scored router, same
+    threshold constant KeywordRetriever-scored retrieval uses (NOTES.md §17)."""
+    router, threshold = build_router(CORPUS_DIR)
+
+    assert isinstance(router, Router)
+    assert isinstance(router._retriever, KeywordRetriever)
+    assert threshold == CONFIDENCE_THRESHOLD

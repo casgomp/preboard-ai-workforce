@@ -12,6 +12,7 @@ from pathlib import Path
 from preboard.corpus import ChunkSource, LocalMarkdownSource
 from preboard.generation import Generator, StubGenerator
 from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever, Retriever
+from preboard.routing import DirectorySource, Router, ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD
 
 FM_ENDPOINT_ENV = "DATABRICKS_FM_ENDPOINT"
 DEFAULT_FM_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
@@ -60,6 +61,21 @@ def build_retriever(corpus_dir: Path) -> tuple[Retriever, float]:
 
         return EmbeddingRetriever(source), EMBEDDING_CONFIDENCE_THRESHOLD
     return KeywordRetriever(source), CONFIDENCE_THRESHOLD
+
+
+def build_router(corpus_dir: Path) -> tuple[Router, float]:
+    """Mirrors `build_retriever`'s credential check and reuses the same Retriever
+    implementations, just pointed at `data/directory.md` instead of an offer's own
+    corpus — but with its own threshold in the embedding case
+    (`ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD`, not `EMBEDDING_CONFIDENCE_THRESHOLD`):
+    short directory blurbs score lower than offer-packet text even for a correct
+    match, so the two thresholds aren't interchangeable (NOTES.md §17)."""
+    source = DirectorySource(corpus_dir)
+    if has_databricks_credentials():
+        from preboard.embedding_retrieval import EmbeddingRetriever
+
+        return Router(EmbeddingRetriever(source)), ROUTER_EMBEDDING_CONFIDENCE_THRESHOLD
+    return Router(KeywordRetriever(source)), CONFIDENCE_THRESHOLD
 
 
 def build_generator() -> Generator:
