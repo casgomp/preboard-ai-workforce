@@ -48,17 +48,19 @@ DB_PATH = REPO_ROOT / "misses.db"
 FRONTEND_ORIGIN = "http://localhost:3000"
 
 
-def _build_qa() -> QA:
+def _build_qa():
     retriever, confidence_threshold = build_retriever(CORPUS_DIR)
     router, router_threshold = build_router(CORPUS_DIR)
-    return QA(
+    miss_log = build_miss_log(DB_PATH)
+    qa = QA(
         retriever=retriever,
         generator=build_generator(),
-        miss_log=build_miss_log(DB_PATH),
+        miss_log=miss_log,
         confidence_threshold=confidence_threshold,
         router=router,
         router_threshold=router_threshold,
     )
+    return qa, miss_log
 
 
 @asynccontextmanager
@@ -66,7 +68,9 @@ async def lifespan(app: FastAPI):
     # Built once at startup, not per request: EmbeddingRetriever caches chunk
     # embeddings per instance, so a fresh QA per request would re-embed the whole
     # corpus on every question (same reasoning as app.py's @st.cache_resource).
-    app.state.qa = _build_qa()
+    # miss_log is kept alongside QA (not reached via QA's private _miss_log) so
+    # /knowledge-gaps can read it without poking at QA's internals.
+    app.state.qa, app.state.miss_log = _build_qa()
     yield
 
 
@@ -157,3 +161,58 @@ def ask(req: AskRequest) -> GroundedAnswer:
 @app.get("/health")
 def health() -> dict:
     return {"real_components": has_databricks_credentials()}
+
+
+class DepartmentGap(BaseModel):
+    department: str
+    count: int
+    distinctQuestions: int
+    distinctOffers: int
+    lastSeen: str
+
+
+class QuestionGap(BaseModel):
+    question: str
+    department: str | None
+    count: int
+    distinctOffers: int
+    lastSeen: str
+
+
+class KnowledgeGaps(BaseModel):
+    departments: list[DepartmentGap]
+    questions: list[QuestionGap]
+
+
+@app.get("/knowledge-gaps")
+def knowledge_gaps() -> KnowledgeGaps:
+    """Backs `frontend`'s HR "Knowledge gaps" panel (ported from
+    `feature/fused-preboard`) — the same `question_misses` data `?view=gaps` in
+    `app.py` and `gap_report.main()` already show, just as JSON. No HR/candidate
+    scoping here: that's the Next.js route's job (`readSession`/`hasCapability`),
+    matching how `/ask` leaves auth to the caller (NOTES.md §19, D3)."""
+    from preboard.gap_report import department_gap_report, gap_report
+
+    miss_log = app.state.miss_log
+    return KnowledgeGaps(
+        departments=[
+            DepartmentGap(
+                department=d.department,
+                count=d.count,
+                distinctQuestions=d.distinct_questions,
+                distinctOffers=d.distinct_offers,
+                lastSeen=d.last_seen,
+            )
+            for d in department_gap_report(miss_log)
+        ],
+        questions=[
+            QuestionGap(
+                question=q.example_question,
+                department=q.department,
+                count=q.count,
+                distinctOffers=q.distinct_offers,
+                lastSeen=q.last_seen,
+            )
+            for q in gap_report(miss_log, top_n=20)
+        ],
+    )

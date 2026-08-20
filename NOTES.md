@@ -92,11 +92,9 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   map `data_array` rows to `Employee`/`DayOneFact` and parameterize `updateFact`'s
   SQL (it currently interpolates, the exact bug class NOTES.md §11 already paid for
   once in Python).
-- **No misses dashboard** (PLAN_PR12's B7, cut) — `question_misses` is populated
-  live (§19) but nothing visualizes it yet; `preboard/gap_report.py`'s
-  `department_gap_report` is the CLI/Streamlit equivalent, just not a Databricks
-  dashboard. TRIGGER: time remains before presenting; seed 20-30 misses first, an
-  empty dashboard is worse than none.
+- **Misses dashboard**: TRIGGER FIRED, shipped in §20 — not a Databricks dashboard
+  (PLAN_PR12's B7 as originally scoped, still not done), but an HR-facing
+  "Knowledge gaps" panel in `frontend/`, ported from a teammate's parallel branch.
 - **Only E001 (Anna) and E002 (David) have offer packets** — `employees` in Unity
   Catalog has five rows (E001-E005, PLAN_PR12 D2), but `document_chunks` only has
   content for two of them plus the shared handbook; a question about Maria, Lukas,
@@ -861,3 +859,43 @@ front of the sentence (rather than the middle) flipped it to People Operations
 (0.566 vs 0.547). Consistent with §17's existing caveat that `covers` text is a
 live calibration, not a fire-and-forget field — re-probed after any wording
 change, not assumed.
+
+## §20 Knowledge gaps panel, ported from `feature/fused-preboard`
+
+A second teammate branch (`feature/fused-preboard`, also forked from `49c7caf`)
+independently built its own frontend/backend fusion — a different `api/main.py`
+FastAPI app, a `preboard/document_library.py`, a service-key-authenticated
+`frontend/services/backend.ts` — architecturally incompatible with PR12's
+`server.py`/Unity-Catalog convergence (different backend entry point, different
+data model). Not merged wholesale. Instead, ported just the one self-contained UI
+feature the user asked for: an HR-facing "Knowledge gaps" panel.
+
+- **`frontend/components/hr/KnowledgeGapPanel.tsx`**: copied verbatim, unmodified
+  — it was already self-contained (fetches `/api/knowledge-gaps`, renders a
+  department breakdown and a "most common unanswered questions" table), no
+  dependency on that branch's backend plumbing. Wired into `HRDashboard.tsx`
+  exactly where the other branch put it (after `<DocumentManager />`).
+- **`frontend/app/api/knowledge-gaps/route.ts`**: written fresh, not ported — the
+  other branch's version called their `backend.ts` (service-key header auth
+  against `api/main.py`); this one matches this repo's actual pattern
+  (`ask/route.ts`): reads the session, requires `hasCapability(session, "HR")`,
+  calls `PYTHON_API_URL` directly (`server.py` trusts the server-to-server call,
+  same D3 reasoning as `/ask`).
+- **`server.py` gained `GET /knowledge-gaps`**: reuses `preboard/gap_report.py`'s
+  existing `department_gap_report`/`gap_report` — the same data `app.py`'s
+  `?view=gaps` and `gap_report.main()` already show, now also as JSON. Required
+  keeping a reference to the `MissLog`/`UnityCatalogMissLog` instance on
+  `app.state` alongside `QA` (previously only reachable via `QA`'s private
+  `_miss_log`) so the endpoint doesn't reach into `QA`'s internals.
+- **Verified end-to-end against the real workspace and the real Next.js dev
+  server**: logged in as HR (`sarah.weber@dayone.demo`), hit `/api/knowledge-gaps`
+  through the actual route — 200 with real `question_misses` data (2 departments,
+  2 distinct questions, matching prior live testing sessions' data). Logged in as
+  a candidate account and confirmed the same route returns `403` — the HR
+  capability check actually gates it, not just present in the code.
+  `npm run typecheck`/`lint`/`test` and `python -m pytest` all stayed green.
+  **Not done**: a browser screenshot of the rendered panel — the Claude-in-Chrome
+  extension wasn't connected in this environment. The data contract match (exact
+  camelCase field names, verified via the real route's JSON response) and the
+  component being an unmodified copy make this a low-risk gap, not skipped
+  carelessly, but it's not the same as having looked at it.

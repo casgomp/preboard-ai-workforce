@@ -7,6 +7,7 @@ import { daysUntil, formatUpdated } from "../../lib/utils/date";
 import { LoadingState } from "../shared/LoadingState";
 import { StatusPill } from "../shared/StatusPill";
 import { DocumentManager } from "../documents/DocumentManager";
+import { KnowledgeGapPanel } from "./KnowledgeGapPanel";
 
 const severityRank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
 const factLabels: Record<string, string> = { contract_status: "Contract", payroll_status: "Payroll", manager_assigned: "Manager assignment", employee_account: "Employee account", laptop_status: "Laptop", software_access: "Software permissions", badge_status: "Building badge", parking_status: "Parking", welcome_meeting: "Welcome meeting", day_one_agenda: "Day-one agenda", orientation_status: "Orientation" };
@@ -75,6 +76,7 @@ export function HRDashboard() {
           <aside className="rounded-[26px] bg-[#172b26] p-6 text-white"><p className="text-[10px] font-semibold tracking-[.14em] text-white/45">FACT HISTORY</p><h2 className="mt-2 text-xl font-semibold">Latest changes</h2><div className="mt-6 space-y-1">{detail.history.slice(0, 6).map((event, index) => <div key={event.eventId} className="relative border-l border-white/10 pb-6 pl-5"><i className="absolute -left-1.5 top-1 h-3 w-3 rounded-full border-[3px] border-[#172b26] bg-[#87af9e]" /><div className="flex items-center justify-between gap-2"><p className="text-sm font-medium">{event.label ?? `${factLabels[event.factKey]} changed`}</p><time className="text-[10px] text-white/40">{formatUpdated(event.timestamp)}</time></div>{event.previousValue && <p className="mt-1 text-xs text-white/55">{event.previousValue} → {event.newValue}</p>}<p className="mt-1 text-[10px] text-white/35">Source: {event.sourceSystem}</p>{index === 0 && event.previousValue && <span className="mt-2 inline-block rounded bg-white/10 px-2 py-1 text-[9px]">LATEST</span>}</div>)}</div></aside>
         </div>
         <DocumentManager />
+        <KnowledgeGapPanel />
       </section>
     </main>
   );

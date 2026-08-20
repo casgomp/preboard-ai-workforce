@@ -1,0 +1,22 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+type DepartmentGap = { department: string; count: number; distinctQuestions: number; distinctOffers: number; lastSeen: string };
+type QuestionGap = { question: string; department: string | null; count: number; distinctOffers: number; lastSeen: string };
+
+export function KnowledgeGapPanel() {
+  const [data, setData] = useState<{ departments: DepartmentGap[]; questions: QuestionGap[] } | null>(null);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setError("");
+    const response = await fetch("/api/knowledge-gaps", { cache: "no-store" });
+    const payload = await response.json();
+    if (response.ok) setData(payload); else setError(payload.error ?? "Unable to load knowledge gaps.");
+  }
+
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, []);
+
+  return <section className="mt-6 rounded-[28px] border border-black/[.06] bg-white p-6 shadow-sm lg:p-8"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#65736d]">Learning loop</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em]">Knowledge gaps</h2><p className="mt-2 text-sm text-[#6d7873]">Questions the document library could not support, routed to the accountable team.</p></div><button onClick={load} className="self-start rounded-full border border-black/10 px-4 py-2 text-xs font-medium text-[#53645d] hover:bg-[#f5f7f5]">Refresh</button></div>{error && <p role="alert" className="mt-5 rounded-xl bg-[#fff0e8] p-3 text-sm text-[#914b2d]">{error}</p>}{data && data.questions.length === 0 && <div className="mt-6 rounded-2xl bg-[#f5f7f5] p-6 text-sm text-[#71807a]">No unsupported questions have been logged yet.</div>}{data && data.questions.length > 0 && <div className="mt-6 grid gap-6 xl:grid-cols-[.7fr_1.3fr]"><div><h3 className="text-sm font-semibold">By department</h3><div className="mt-3 space-y-2">{data.departments.map((item) => <div key={item.department} className="rounded-xl bg-[#f5f7f5] p-4"><div className="flex items-center justify-between"><p className="text-sm font-medium">{item.department}</p><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold">{item.count}</span></div><p className="mt-1 text-[11px] text-[#7c8782]">{item.distinctQuestions} distinct question{item.distinctQuestions === 1 ? "" : "s"} · {item.distinctOffers} user{item.distinctOffers === 1 ? "" : "s"}</p></div>)}</div></div><div><h3 className="text-sm font-semibold">Most common unanswered questions</h3><div className="mt-3 overflow-hidden rounded-xl border border-black/[.06]"><table className="w-full text-left text-xs"><thead className="bg-[#f7f8f7] text-[10px] uppercase tracking-[.1em] text-[#7b8681]"><tr><th className="px-4 py-3">Question</th><th className="px-4 py-3">Owner</th><th className="px-4 py-3 text-right">Count</th></tr></thead><tbody>{data.questions.map((item) => <tr key={`${item.question}-${item.department}`} className="border-t border-black/[.05]"><td className="px-4 py-3 font-medium">{item.question}</td><td className="px-4 py-3 text-[#6f7b76]">{item.department ?? "Unrouted"}</td><td className="px-4 py-3 text-right font-semibold">{item.count}</td></tr>)}</tbody></table></div></div></div>}</section>;
+}
