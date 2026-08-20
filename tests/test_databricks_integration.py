@@ -89,7 +89,7 @@ def test_generator_grounds_its_answer_in_the_chunk():
         ),
     )
 
-    answer = generator.generate("When does my signing bonus get paid?", chunk)
+    answer = generator.generate("When does my signing bonus get paid?", [chunk])
 
     assert answer.strip()
     assert "second paycheck" in answer.lower() or "second pay" in answer.lower()

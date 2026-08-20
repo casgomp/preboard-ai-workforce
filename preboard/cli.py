@@ -73,7 +73,8 @@ def main() -> None:
 
         result = qa.ask(offer_id, question)
         if isinstance(result, Answer):
-            print(f"{result.text}\n\n(source: {result.source_doc} — {result.source_section})")
+            sources = "; ".join(f"{c.source_doc} — {c.source_section}" for c in result.citations)
+            print(f"{result.text}\n\n(source: {sources})")
         elif isinstance(result, Handoff):
             print("I'm not confident enough to answer that from the offer packet.")
             print(f"Reaching out to {result.target.name} ({result.target.contact}) on your behalf.")

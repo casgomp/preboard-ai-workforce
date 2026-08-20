@@ -13,12 +13,25 @@ from preboard.handoff import HandoffTarget, handoff_target
 from preboard.retrieval import Retriever
 from preboard.store import MissLog
 
+# A broad question ("what do I need to do before I start?") can genuinely span several
+# offer-packet sections; answering from only the single top-scored chunk left real
+# information out (PR4). Additional chunks are included as supporting context, but
+# only if they're still reasonably close to the top match — a low-relevance chunk
+# tagging along would dilute the answer without adding anything grounded.
+MAX_SUPPORTING_CHUNKS = 3
+SUPPORTING_SCORE_RATIO = 0.6
+
+
+@dataclass(frozen=True)
+class Citation:
+    source_doc: str
+    source_section: str
+
 
 @dataclass(frozen=True)
 class Answer:
     text: str
-    source_doc: str
-    source_section: str
+    citations: list[Citation]
 
 
 @dataclass(frozen=True)
@@ -55,9 +68,13 @@ class QA:
                 reason="No confident match in the offer packet.",
             )
 
-        text = self._generator.generate(question, top.chunk)
+        supporting = [
+            r for r in results[:MAX_SUPPORTING_CHUNKS] if r.score >= top_score * SUPPORTING_SCORE_RATIO
+        ]
+        chunks = [r.chunk for r in supporting]
+
+        text = self._generator.generate(question, chunks)
         return Answer(
             text=text,
-            source_doc=top.chunk.doc_id,
-            source_section=top.chunk.section,
+            citations=[Citation(source_doc=c.doc_id, source_section=c.section) for c in chunks],
         )

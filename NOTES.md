@@ -93,6 +93,17 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   SQL bug: hand-escaped string literals silently dropped apostrophes (Spark SQL
   ignores `''` doubling, unlike ANSI SQL) — switched to parameterized inserts, which
   removes the bug class rather than patching the escaping. See NOTES_ARCHIVE.md.
+- **PR4 + critical fix** (2026-08-20) – multi-chunk generation (a broad question can
+  now draw on up to 3 supporting sections, not just the single top match) and fixed a
+  serious credential-detection bug: `has_databricks_credentials()` only checked
+  `DATABRICKS_TOKEN`, but the deployed app authenticates via
+  `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET` (Databricks Apps' own injected
+  OAuth identity) — meaning **the live deployed app had been silently running in local
+  stub mode (`KeywordRetriever` + `StubGenerator`) the entire time since first
+  deploying**, contradicting everything reported earlier about it using real
+  retrieval/generation. Found by adding a startup log line and reading deployed logs,
+  not by any test — nothing in the suite runs inside an actual deployed app's
+  environment. See §12 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -278,3 +289,45 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
   character, and matches how `UnityCatalogSource.load()` already queried safely.
   **Lesson for future SQL string-building against this workspace: prefer parameters,
   don't assume ANSI-SQL escaping rules hold.**
+
+## §12 PR4 + credential-detection fix
+
+- **Multi-chunk generation**: `qa.py` now passes up to `MAX_SUPPORTING_CHUNKS = 3`
+  chunks to the generator, not just the top match — any chunk scoring at least
+  `SUPPORTING_SCORE_RATIO = 0.6` of the top chunk's score qualifies. `Answer.citations`
+  is a list now (was singular `source_doc`/`source_section`); `Generator.generate`
+  takes `list[Chunk]`. Motivated by a real observed failure: "what do I need to do
+  before I start?" was answered from only the "Equipment" section, missing the photo-ID
+  and background-check information that live in other sections. `StubGenerator` joins
+  chunk texts; `DatabricksFMGenerator`'s prompt was also rewritten to ask for a
+  synthesized, natural answer instead of "answer using this excerpt" — the earlier
+  prompt tended to produce paraphrase-shaped excerpt dumps rather than direct answers.
+- **The credential-detection bug (critical, found by luck, not process)**: `wiring.py`'s
+  `has_databricks_credentials()` checked only `DATABRICKS_HOST` and `DATABRICKS_TOKEN`.
+  Databricks Apps inject `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET` for the
+  app's own OAuth identity — never `DATABRICKS_TOKEN`. Every deployment since the app
+  first went live (`6c5a76e` onward, including the PR3/Unity Catalog work) had this
+  check silently evaluating to `False` inside the deployed app, meaning it ran
+  `KeywordRetriever` + `StubGenerator` + whatever `LocalMarkdownSource` fallback the
+  code path picked, **not** the real embeddings/FM/UC path every prior NOTES entry
+  claimed was live and verified there. Local CLI testing was never affected (`.env` has
+  a real `DATABRICKS_TOKEN`), which is exactly why it went unnoticed — every "verified
+  against the live workspace" claim before this was true for local `.env`-based runs,
+  not for the deployed app specifically.
+  **How it surfaced**: the user pasted a real answer from the deployed app that read
+  as verbatim chunk text rather than an LLM paraphrase; a diagnostic startup log line
+  (`app.py`, temporary, replaced with a permanent one-line version) confirmed
+  `has_databricks_credentials()` was `False` in the deployed environment via
+  `databricks apps logs`.
+  **Fix**: `has_databricks_credentials()` now accepts either the PAT path
+  (`DATABRICKS_TOKEN`) or the OAuth path (`DATABRICKS_CLIENT_ID` +
+  `DATABRICKS_CLIENT_SECRET`), alongside `DATABRICKS_HOST` either way. Regression
+  tests in `tests/test_wiring.py` cover all four combinations, including the specific
+  broken one. `app.py` keeps a permanent one-line startup log
+  (`[preboard] real Databricks components: {bool}`) so this class of silent fallback
+  is visible in `databricks apps logs` without needing to SSO into the app to check.
+  **Standing lesson**: nothing in the test suite runs inside an actual deployed
+  Databricks App's environment — local `.env`-based tests and integration tests both
+  use PAT auth, which structurally cannot catch an OAuth-path-only bug. If a future
+  change depends on distinguishing "local dev" from "deployed app," don't trust local
+  testing to validate it — check `databricks apps logs` after deploying, every time.

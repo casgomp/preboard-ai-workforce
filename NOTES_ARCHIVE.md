@@ -162,3 +162,39 @@ chunks against the local files character-for-character rather than just checking
 escaping question entirely rather than fixing the escape character — the same lesson
 as PR1d's `ChatMessage` bug: real network/SQL calls surface failure modes local stubs
 structurally cannot.
+
+## PR4 + credential-detection fix (2026-08-20)
+
+**Why:** The user reported a real answer from the deployed app ("what do I need to do
+before I start?" → an "Equipment"-only answer) that both read as unnaturally verbatim
+and missed information from other relevant sections. Investigating both threads at
+once uncovered something much bigger than either.
+
+**Design (PR4):** `qa.py` now selects up to 3 chunks scoring within 60% of the top
+match and passes all of them to the generator, instead of always exactly one.
+`Generator.generate` and `Answer` changed shape accordingly (`list[Chunk]` in,
+`list[Citation]` out). The FM prompt was rewritten to ask for a synthesized natural
+answer rather than "use this excerpt" — the old prompt structurally encouraged
+excerpt-shaped output.
+
+**The actual finding:** chasing why the pasted answer looked like raw chunk text led
+to discovering `has_databricks_credentials()` checked only `DATABRICKS_TOKEN`, which
+Databricks Apps never set — the deployed app authenticates via
+`DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET` instead. Every deployment since the
+app first went live had been silently running `KeywordRetriever` + `StubGenerator` in
+production, invalidating every prior "verified against the live workspace" claim as
+far as the *deployed app* was concerned (local `.env`-based testing, which uses a PAT,
+was never affected and genuinely was testing the real components — just not the thing
+actually running at the public URL). Confirmed directly via a temporary startup log
+line read through `databricks apps logs`, not through any test.
+
+**Fixed:** `has_databricks_credentials()` accepts either the PAT or OAuth client
+credential path. Regression tests cover all four env-var combinations. A permanent
+one-line startup log survives in `app.py` specifically so this class of bug — correct
+locally, silently degraded once deployed — has a way to be noticed next time without
+needing to SSO into the app first.
+
+**Standing lesson, recorded because it will recur:** no test in this suite runs inside
+an actual deployed Databricks App's environment. Anything gated on distinguishing
+local-dev auth from deployed-app auth needs to be checked against real deployed logs,
+not assumed correct because local tests pass.

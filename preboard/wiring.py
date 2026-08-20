@@ -19,7 +19,19 @@ WAREHOUSE_ID_ENV = "DATABRICKS_WAREHOUSE_ID"
 
 
 def has_databricks_credentials() -> bool:
-    return bool(os.environ.get("DATABRICKS_HOST")) and bool(os.environ.get("DATABRICKS_TOKEN"))
+    """True for either local dev (DATABRICKS_HOST + a personal access token via
+    DATABRICKS_TOKEN) or a deployed Databricks App's own runtime identity (DATABRICKS_HOST
+    + the OAuth client id/secret Databricks injects automatically — never DATABRICKS_TOKEN).
+    Checking only for DATABRICKS_TOKEN silently degraded the deployed app to
+    KeywordRetriever + StubGenerator; caught via a startup log line, not a test, since
+    nothing in the test suite runs inside an actual deployed app's environment."""
+    if not os.environ.get("DATABRICKS_HOST"):
+        return False
+    has_pat = bool(os.environ.get("DATABRICKS_TOKEN"))
+    has_oauth = bool(os.environ.get("DATABRICKS_CLIENT_ID")) and bool(
+        os.environ.get("DATABRICKS_CLIENT_SECRET")
+    )
+    return has_pat or has_oauth
 
 
 def has_uc_warehouse() -> bool:

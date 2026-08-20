@@ -24,6 +24,10 @@ CORPUS_DIR = REPO_ROOT / "data"
 DB_PATH = REPO_ROOT / "misses.db"
 
 st.set_page_config(page_title="preboard", page_icon="📋")
+# Cheap insurance against a repeat of the credential-detection bug (NOTES.md §12):
+# this line is the only way to notice a silent fallback to stub mode without SSO'ing
+# into the app to look at the UI caption — `databricks apps logs` shows it directly.
+print(f"[preboard] real Databricks components: {has_databricks_credentials()}")
 
 
 @st.cache_resource
@@ -76,7 +80,8 @@ def main() -> None:
 
     result = get_qa().ask(offer_id, question)
     if isinstance(result, Answer):
-        reply = f"{result.text}\n\n*Source: {result.source_doc} — {result.source_section}*"
+        sources = "; ".join(f"{c.source_doc} — {c.source_section}" for c in result.citations)
+        reply = f"{result.text}\n\n*Source: {sources}*"
     elif isinstance(result, Handoff):
         reply = (
             "I'm not confident enough to answer that from your offer packet, so I've flagged it "
