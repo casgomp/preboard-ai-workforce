@@ -53,13 +53,13 @@ def test_unknown_offer_id_with_no_offer_specific_match_hands_off(qa):
 
 
 def test_unknown_offer_id_can_still_answer_from_shared_company_content(qa):
-    """Not a security gap: company-wide info (corpus.py's SHARED_DOC_ID) isn't
+    """Not a security gap: company-wide info (files under data/company/) isn't
     candidate-specific, so it's fine for it to answer even without a matching offer
     doc — the auth boundary is verify_token(), not this fallback."""
-    result = qa.ask("someone-else", "What communication tools do we use?")
+    result = qa.ask("someone-else", "When does my health insurance start?")
 
     assert isinstance(result, Answer)
-    assert result.citations[0].source_doc == "company"
+    assert result.citations[0].source_doc == "healthcare-and-insurance"
 
 
 class _FixedRetriever:

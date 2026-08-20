@@ -124,7 +124,9 @@ matters more than it sounds like it should.
   `routing.py` (department handoff routing via Unity Catalog), `auth.py`,
   `wiring.py` (picks real vs. stub components)
 - `data/*.md` — sample offer packets (`E001.md` — Anna Müller, `E002.md` — David
-  Klein) plus `company.md`, shared company-wide content included for every candidate
+  Klein) plus `data/company/*.md`, one file per shared company-wide topic (benefits,
+  IT, payroll, etc.), included for every candidate. `data/company/company.md` is kept
+  for reference but excluded from the corpus.
 - `app.py` — Streamlit chat UI (Databricks App entry point, fallback front end)
 - `server.py` — FastAPI HTTP boundary onto the same backend, for `frontend/`
 - `preboard/cli.py` — CLI front end, same backend, useful for local dev/testing

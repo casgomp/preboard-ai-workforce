@@ -16,17 +16,23 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from preboard.corpus import SHARED_DOC_ID, Chunk, load_chunks
+from preboard.corpus import Chunk, load_chunks
 
 DEFAULT_CATALOG = "workspace"
 DEFAULT_SCHEMA = "preboard"
+
+# The live Unity Catalog schema still has one shared doc under this id, from the
+# last ingest before data/company/ was split into multiple files — corpus.py's
+# local loading no longer uses a single shared-doc concept, so this stays local to
+# the (not yet migrated) Unity Catalog path rather than living in corpus.py.
+_LEGACY_SHARED_DOC_ID = "company"
 
 # Friendly citation titles (Answer.citations[].title, matching the frontend's
 # GroundedAnswer contract) — company_documents.title, not the bare document_id.
 _DOCUMENT_TITLES = {
     "E001": "Anna Müller — Offer Packet",
     "E002": "David Klein — Offer Packet",
-    SHARED_DOC_ID: "Employee Handbook",
+    _LEGACY_SHARED_DOC_ID: "Employee Handbook",
 }
 
 
@@ -63,6 +69,7 @@ class UnityCatalogSource:
                 f"FROM {self._chunks_table} dc LEFT JOIN {self._docs_table} cd "
                 "ON dc.document_id = cd.document_id "
                 "WHERE dc.document_id = :offer_id OR dc.document_id = :shared_id "
+                # (still the single legacy shared doc — see _LEGACY_SHARED_DOC_ID)
                 # Employee chunks before the shared handbook, matching
                 # LocalMarkdownSource's fixed order — see PR3/NOTES.md §14 for the
                 # ordering bug this CASE avoids (plain ORDER BY document_id put the
@@ -73,7 +80,7 @@ class UnityCatalogSource:
             warehouse_id=self._warehouse_id,
             parameters=[
                 StatementParameterListItem(name="offer_id", value=offer_id, type="STRING"),
-                StatementParameterListItem(name="shared_id", value=SHARED_DOC_ID, type="STRING"),
+                StatementParameterListItem(name="shared_id", value=_LEGACY_SHARED_DOC_ID, type="STRING"),
             ],
             wait_timeout="30s",
         )
