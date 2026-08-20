@@ -61,16 +61,9 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   per question rather than reading precomputed vectors from the table. Fine at this
   corpus size. TRIGGER: the corpus grows enough that per-question embedding
   latency/cost matters — store embeddings as a column and only recompute on ingest.
-- **T-minus-aware answers, not just date-resolved ones** – §15 makes the generator
-  resolve relative phrasing ("about a week before your start date") to a concrete
-  date/day-count. The next step is letting the *content* of the answer change with
-  T-minus, not just its date arithmetic: at T-60 "nothing to do yet", at T-3 "should
-  already be there, escalate now" for the same equipment question. Real product
-  insight from the countdown framing, genuinely hard to do with a static FAQ, but
-  needs either prompt rules keyed on days-remaining bands or corpus content written
-  per band — more than the one-line fix §15 shipped. TRIGGER: time remains after the
-  core loop is solid; demoable as the same question asked at two points on the
-  countdown giving two different, both-correct answers.
+- **T-minus-aware answers**: TRIGGER FIRED, shipped in §16 (PR7) — band-guided
+  urgency framing, `--as-of`/`?as_of=` demo override. Not yet re-tuned against real
+  usage; band edges are a guess (§16/D4).
 - **`preboard/offers.py` start dates are hardcoded, same stub shape as `handoff.py`'s
   target map** – fine for two demo candidates. TRIGGER: n/a for this project's scope;
   a real version reads start date from whatever system issues the offer.
@@ -136,6 +129,11 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   CLI, undemoable from the deployed app); wrapped `app.py`'s answer call in
   try/except so an FM timeout degrades to a handoff instead of a traceback on stage.
   See §15 and NOTES_ARCHIVE.md.
+- **PR7** (2026-08-20) – T-minus-banded answer urgency: the same equipment question
+  now reads as reassuring ("no need to worry yet") at T-105 and urgent ("reach out
+  now") at T-3, verified against the real FM endpoint. Added `--as-of`/`?as_of=` demo
+  override so this is showable without waiting real days between the two answers.
+  See §16 and NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -473,3 +471,42 @@ actively false.
   start in N days (Month D, YYYY)" under the title, sourced from the same
   `preboard/offers.py` lookup — makes the countdown framing visible on the page
   itself, not just in answer text.
+
+## §16 PR7: T-minus-banded answer urgency
+
+§15 resolved the offer packet's relative timing phrases into concrete dates. This
+made the *content* itself change with T-minus — the same equipment question should
+read as "nothing to worry about yet" a few months out and "escalate now" days out,
+not just report a different date in the same neutral tone.
+
+- **D1 — banded prompt guidance, not per-band corpus content**: a per-band
+  instruction appended to the existing `date_context` line reuses §15's plumbing
+  entirely (constants + a longer prompt instruction); per-band corpus content would
+  need every question-worthy topic multiplied by band and a retrieval change to pick
+  among them — out of scope for the time available. `_TMINUS_BANDS` /
+  `_TMINUS_OVERDUE_GUIDANCE` in `qa.py`; `_tminus_guidance(delta_days)` returns the
+  first band whose threshold `delta_days` clears, checked in descending threshold
+  order.
+- **D2 — band selection lives in `qa.py`, not `offers.py`**: `offers.py` stays pure
+  data (start dates only); banding is prompt policy, alongside the rest of
+  `_date_context`'s prompt-shaping logic.
+- **D3 — `as_of` override for demoing without waiting real days**: `QA.ask(...,
+  as_of: date | None)`, CLI `--as-of YYYY-MM-DD`, Streamlit `?as_of=YYYY-MM-DD`. Only
+  reaches the prompt string built in `_date_context` — confirmed it does not touch
+  `MissLog.log_miss` or `verify_token`, so an unauthenticated, guessable query param
+  carries no security weight here; it's a demo/testing knob, not a bypass of
+  anything.
+- **D4 — band edges (60 / 14 / 4 days) are a guess, not tuned**: chosen to roughly
+  match the corpus's own stated lead times ("about a week", "ten days", "three
+  business days before you start"), unlike `EMBEDDING_CONFIDENCE_THRESHOLD` which
+  was probed against real scores (§9). Worst case if a boundary is wrong: a
+  slightly-off tone, not a wrong fact — retrieval and grounding are untouched by this
+  PR. Named as a guess rather than presented as calibrated.
+- **Verified against the real FM endpoint** (not just the deterministic band-
+  selection unit tests in `tests/test_qa.py`, which don't and can't test LLM
+  compliance): "When does my laptop arrive?" for `jordan-rivera` at `--as-of
+  2026-06-01` (T-105) answered "there's no need to worry about it just yet... the
+  laptop shipment hasn't started its lead time... everything is on track"; the same
+  question at `--as-of 2026-09-11` (T-3) answered "that's already passed... it's
+  likely overdue... you should reach out to them now to inquire about the status."
+  Same corpus, same retrieval, only the injected date/band guidance changed.

@@ -23,6 +23,41 @@ from preboard.store import MissLog
 MAX_SUPPORTING_CHUNKS = 3
 SUPPORTING_SCORE_RATIO = 0.6
 
+# Guessed against the corpus's own lead-time language ("about a week", "ten days",
+# "three business days before you start") — not empirically probed like
+# EMBEDDING_CONFIDENCE_THRESHOLD (see NOTES.md §16/D4). Ordered by descending
+# days-until-start threshold; _tminus_guidance returns the first satisfied band, so
+# earlier entries must have the larger threshold.
+_TMINUS_BANDS: list[tuple[int, str]] = [
+    (
+        60,
+        "More than 8 weeks out: reassure the candidate nothing is overdue yet — most "
+        "pre-start items (equipment, paperwork) haven't started their lead time.",
+    ),
+    (
+        14,
+        "2-8 weeks out: pre-start items may be in motion soon; mention timing "
+        "normally, no urgency.",
+    ),
+    (
+        4,
+        "1-2 weeks out: this is close. If an excerpt states a lead time before the "
+        "start date, say it should be arriving soon and worth checking on.",
+    ),
+]
+_TMINUS_OVERDUE_GUIDANCE = (
+    "3 days or fewer until start, or the start date has passed: if an excerpt gives "
+    "a lead time before the start date with nothing to suggest it happened, treat it "
+    "as overdue and tell the candidate to escalate now, not wait."
+)
+
+
+def _tminus_guidance(delta_days: int) -> str:
+    for threshold, guidance in _TMINUS_BANDS:
+        if delta_days >= threshold:
+            return guidance
+    return _TMINUS_OVERDUE_GUIDANCE
+
 
 @dataclass(frozen=True)
 class Citation:
@@ -58,7 +93,12 @@ class QA:
         self._miss_log = miss_log
         self._confidence_threshold = confidence_threshold
 
-    def ask(self, offer_id: str, question: str) -> AnswerResult:
+    def ask(self, offer_id: str, question: str, as_of: date | None = None) -> AnswerResult:
+        """`as_of` overrides "today" for the date/T-minus context injected into the
+        generated answer (PR7/NOTES.md §16, D3) — demo-only, so the same question can
+        be shown at two points on the countdown without waiting real days. It affects
+        only the prompt text built below; it never reaches `log_miss` or auth, so it
+        carries no security weight even though it's an unauthenticated override."""
         results = self._retriever.retrieve(offer_id, question)
         top = results[0] if results else None
         top_score = top.score if top else 0.0
@@ -75,20 +115,22 @@ class QA:
         ]
         chunks = [r.chunk for r in supporting]
 
-        text = self._generator.generate(question, chunks, self._date_context(offer_id))
+        text = self._generator.generate(question, chunks, self._date_context(offer_id, as_of))
         return Answer(
             text=text,
             citations=[Citation(source_doc=c.doc_id, source_section=c.section) for c in chunks],
         )
 
-    def _date_context(self, offer_id: str) -> str | None:
-        """Plain-language line resolving the offer packet's start-date-relative
-        phrasing (NOTES.md §15). None for offer_ids with no known start date (e.g. the
-        shared-company-only fallback) — nothing to resolve without one."""
+    def _date_context(self, offer_id: str, as_of: date | None = None) -> str | None:
+        """Plain-language lines resolving the offer packet's start-date-relative
+        phrasing into a concrete date (NOTES.md §15) and giving T-minus-banded
+        guidance on how urgently to frame it (§16). None for offer_ids with no known
+        start date (e.g. the shared-company-only fallback) — nothing to resolve or
+        band without one."""
         info = offer_info(offer_id)
         if info is None:
             return None
-        today = date.today()
+        today = as_of or date.today()
         delta = (info.start_date - today).days
         if delta > 0:
             timing = f"in {delta} days"
@@ -98,5 +140,5 @@ class QA:
             timing = f"{-delta} days ago"
         return (
             f"Today's date is {today.isoformat()}. This candidate's start date is "
-            f"{info.start_date.isoformat()}, which is {timing}."
+            f"{info.start_date.isoformat()}, which is {timing}. {_tminus_guidance(delta)}"
         )

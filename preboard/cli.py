@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,6 +34,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--db", type=Path, default=REPO_ROOT / "misses.db", help="SQLite path for the miss log"
+    )
+    parser.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        default=None,
+        help="DEMO ONLY: answer as if today were this date (YYYY-MM-DD), for showing "
+        "the same question at different points on the countdown",
     )
     args = parser.parse_args()
 
@@ -71,7 +79,7 @@ def main() -> None:
         if not question:
             continue
 
-        result = qa.ask(offer_id, question)
+        result = qa.ask(offer_id, question, as_of=args.as_of)
         if isinstance(result, Answer):
             sources = "; ".join(f"{c.source_doc} — {c.source_section}" for c in result.citations)
             print(f"{result.text}\n\n(source: {sources})")

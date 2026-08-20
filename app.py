@@ -97,9 +97,16 @@ def main() -> None:
     if offer_id is None:
         return
 
+    as_of_raw = st.query_params.get("as_of")
+    try:
+        as_of = date.fromisoformat(as_of_raw) if as_of_raw else None
+    except ValueError:
+        as_of = None
+
     info = offer_info(offer_id)
     if info is not None:
-        delta = (info.start_date - date.today()).days
+        today = as_of or date.today()
+        delta = (info.start_date - today).days
         if delta > 0:
             st.caption(f"You start in {delta} days ({info.start_date:%B %d, %Y}).")
         elif delta == 0:
@@ -123,7 +130,7 @@ def main() -> None:
         st.markdown(question)
 
     try:
-        result = get_qa().ask(offer_id, question)
+        result = get_qa().ask(offer_id, question, as_of=as_of)
     except Exception as exc:  # noqa: BLE001 — degrade to a handoff, never a traceback on stage
         print(f"[preboard] error answering question for {offer_id!r}: {exc!r}")
         target = handoff_target(offer_id)

@@ -4,7 +4,7 @@ import pytest
 
 from preboard.corpus import Chunk, LocalMarkdownSource
 from preboard.generation import StubGenerator
-from preboard.qa import QA, Answer, Handoff
+from preboard.qa import QA, Answer, Handoff, _tminus_guidance, _TMINUS_OVERDUE_GUIDANCE
 from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever, RetrievedChunk
 from preboard.store import MissLog
 
@@ -101,3 +101,34 @@ def test_broad_question_pulls_in_supporting_chunks_above_score_ratio(tmp_path):
     assert isinstance(result, Answer)
     assert {c.section for c in generator.received_chunks} == {"A", "B"}
     assert {c.source_section for c in result.citations} == {"A", "B"}
+
+
+@pytest.mark.parametrize(
+    "delta_days,expected_snippet",
+    [
+        (60, "More than 8 weeks"),
+        (59, "2-8 weeks"),
+        (14, "2-8 weeks"),
+        (13, "1-2 weeks"),
+        (4, "1-2 weeks"),
+        (3, _TMINUS_OVERDUE_GUIDANCE),
+        (0, _TMINUS_OVERDUE_GUIDANCE),
+        (-5, _TMINUS_OVERDUE_GUIDANCE),
+    ],
+)
+def test_tminus_guidance_picks_the_right_band_at_every_boundary(delta_days, expected_snippet):
+    assert expected_snippet in _tminus_guidance(delta_days)
+
+
+def test_date_context_includes_start_date_and_tminus_guidance(qa):
+    from datetime import date
+
+    context = qa._date_context(OFFER_ID, as_of=date(2026, 9, 11))  # 3 days before Sept 14 start
+
+    assert "2026-09-11" in context
+    assert "in 3 days" in context
+    assert _TMINUS_OVERDUE_GUIDANCE in context
+
+
+def test_date_context_is_none_for_an_offer_with_no_known_start_date(qa):
+    assert qa._date_context("someone-else") is None
