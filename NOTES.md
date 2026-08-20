@@ -3,9 +3,11 @@
 Preboarding Q&A buffer for signed-but-not-started hires. Answers questions from the
 offer packet and preboarding docs, hands off to HR when it can't, logs what it missed.
 
-Stack: Python, Databricks Free Edition (serverless-only). Retrieval corpus in Unity
-Catalog, generation via a Foundation Model endpoint, chat UI as a Databricks App, miss
-log as a SQL table. App framework undecided – see PR1.
+Stack: Python, Databricks Free Edition (serverless-only). Generation via a Foundation
+Model endpoint (real, PR1d), retrieval via a Databricks embeddings endpoint with
+cosine similarity computed in-process (real, PR1d — not a Unity Catalog Vector Search
+index; see §9), chat UI as a Databricks App (Streamlit, PR1c), miss log as local SQLite
+(stand-in for a UC SQL table).
 
 Team of 4, 48-hour hackathon build. Claude writes implementation directly this project
 (no local pairing/scaffolding needed) – speed over teaching.
@@ -35,16 +37,22 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
   loop is demoable end to end.
 - **German-first corpus** – FM endpoint handles the language; the corpus and citations
   must match. TRIGGER: the demo audience needs German, or the source docs are German.
-- **Keyword-overlap retrieval gives false positives on common/incidental words** – hit
-  three times now: "your" and recurring proper nouns/dates (fixed via `_STOPWORDS`,
-  PR1a), and a single shared content word ("manager") clearing the ratio threshold and
-  returning a wrong answer instead of a handoff (fixed via `MIN_OVERLAP_TOKENS`, PR2).
-  Both are patches on a scorer that has no real notion of confidence, not a structural
-  fix — expect more of these until PR1d lands real vector search. TRIGGER: PR1d.
+- **`KeywordRetriever`'s false-positive weakness is now fallback-only, not fixed** –
+  `EmbeddingRetriever` (PR1d) is used whenever Databricks credentials are configured;
+  `KeywordRetriever` only runs for teammates without credentials (see `wiring.py`). Its
+  known issues ("your", incidental proper nouns, single shared words) are unfixed and
+  will resurface for anyone running in stub mode. TRIGGER: n/a — accepted as a
+  dev-only fallback, not on the path to fixing.
 - **Gap report groups by exact normalized text, not semantic similarity** – two
   differently-phrased versions of the same missed question count as separate rows.
-  Fine for a small hackathon demo corpus; would undercount real gaps at scale. TRIGGER:
-  PR1d (once embeddings exist, cluster misses by similarity instead of exact match).
+  TRIGGER FIRED: PR1d added real embeddings. Not yet used for gap-report clustering —
+  unclaimed follow-up, not done in PR1d.
+- **Corpus lives in local markdown files, not Unity Catalog** – `EmbeddingRetriever`
+  (PR1d) reads `data/*.md` directly; embeddings are computed live per question/offer,
+  nothing is persisted in UC. Fine at this corpus size (embeds fast, no caching needed)
+  but doesn't match the original "corpus in Unity Catalog" stack claim. TRIGGER: the
+  corpus grows enough that per-question embedding latency or cost matters, or the pitch
+  needs to show data actually living in UC.
 
 ## §3 Shipped
 
@@ -61,6 +69,14 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
 - **PR2** – gap report, ranked by frequency, aggregated across all offers (never
   per-cohort — see invariant discussion in §2). Found and fixed a second retrieval
   false-positive while generating demo data for it. See NOTES_ARCHIVE.md.
+- **PR1d** (2026-08-20) – real retrieval (Databricks embeddings endpoint + in-process
+  cosine similarity) and real generation (Databricks FM chat endpoint), verified against
+  the live workspace via 10 integration tests and a real-browser run — both a grounded
+  question and the exact "manager" false-positive from PR2 confirmed fixed under real
+  embeddings. Found and fixed a second real SDK bug (typed `ChatMessage`, not raw
+  dicts). Graceful fallback to the local stubs when no credentials are configured
+  (`wiring.py`), so teammates without a workspace still get a working app. See
+  NOTES_ARCHIVE.md.
 
 ## §4 Release order
 
@@ -75,9 +91,11 @@ Team of 4, 48-hour hackathon build. Claude writes implementation directly this p
 3. PR1c – Streamlit chat UI (Databricks Apps-native), reusing the same QA/auth stack
    as the CLI. Runs locally now; becomes a real Databricks App at deploy time with no
    code change.
-4. PR1d – swap in real Unity Catalog + vector search retrieval. Blocked on workspace
-   credentials.
-5. PR2 – gap report, aggregated across all past candidates, ranked by frequency.
+4. PR2 – gap report, aggregated across all past candidates, ranked by frequency.
+5. PR1d – real retrieval (Databricks embeddings endpoint, in-process cosine
+   similarity — not a Unity Catalog Vector Search index, see §9) and real generation
+   (Databricks FM chat endpoint), with graceful fallback to local stubs when no
+   credentials are configured.
 
 First slice cut line: if the loop in PR1a isn't demoable by end of day 1, PR1b's real
 retrieval/auth and PR2 are both dropped from the pitch and named as future work instead.
@@ -136,3 +154,34 @@ retrieval/auth and PR2 are both dropped from the pitch and named as future work 
 - **Retrieval fix, found while seeding demo data for this report**: a single shared
   content word ("manager") was enough to clear `CONFIDENCE_THRESHOLD` and return a
   wrong answer instead of a handoff. Added `MIN_OVERLAP_TOKENS = 2` in `retrieval.py`.
+
+## §9 PR1d decisions
+
+- **No Unity Catalog Vector Search index** – a managed index needs a Delta table, a
+  sync pipeline, and a provisioned Vector Search endpoint; real setup and query
+  latency for a corpus that's a handful of chunks per offer. `EmbeddingRetriever`
+  (`embedding_retrieval.py`) calls the `databricks-gte-large-en` embeddings endpoint
+  directly and computes cosine similarity in-process instead. Deferred to §2 if the
+  corpus outgrows this.
+- **`EMBEDDING_CONFIDENCE_THRESHOLD = 0.62`, empirically tested, not guessed** – 11
+  probe questions (6 grounded, 5 not) against the real endpoint did NOT separate
+  cleanly: grounded scores ranged 0.576-0.757, ungrounded 0.392-0.602, overlapping in
+  0.58-0.62. 0.62 sits just above every ungrounded score in the sample; the one
+  grounded question that falls short triggers a handoff, not a wrong answer — the safe
+  side of invariant §1.4. Small sample; `tests/test_databricks_integration.py` is the
+  executable record and should be re-run (`RUN_DATABRICKS_INTEGRATION_TESTS=1`) if the
+  embedding model or corpus changes enough to be worth re-checking.
+- **Graceful fallback, not a hard dependency**: `wiring.py` picks `EmbeddingRetriever`
+  + `DatabricksFMGenerator` when `DATABRICKS_HOST`/`DATABRICKS_TOKEN` are set, else
+  `KeywordRetriever` + `StubGenerator`. A teammate without workspace access still gets
+  a working (locally-scored) app; the Streamlit UI shows a "local stub mode" caption
+  when falling back.
+- **Credentials via `.env`, gitignored** – loaded with `python-dotenv` in `cli.py` and
+  `app.py`. `DATABRICKS_FM_ENDPOINT` is optional, defaulting to
+  `databricks-meta-llama-3-3-70b-instruct`.
+- **Real SDK bug found, not a config error**: `WorkspaceClient().serving_endpoints
+  .query(messages=[...])` needs `databricks.sdk.service.serving.ChatMessage` objects,
+  not raw `{"role": ..., "content": ...}` dicts — the dict form fails with
+  `AttributeError: 'dict' object has no attribute 'as_dict'`. Only surfaced once the
+  generator was actually called against a live endpoint; no unit test would have
+  caught it since `StubGenerator` never touches the SDK.

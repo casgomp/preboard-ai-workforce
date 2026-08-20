@@ -10,12 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import streamlit as st
+from dotenv import load_dotenv
 
-from preboard.auth import InvalidToken, verify_token
-from preboard.generation import StubGenerator
-from preboard.qa import QA, Answer, Handoff
-from preboard.retrieval import KeywordRetriever
-from preboard.store import MissLog
+load_dotenv()
+
+from preboard.auth import InvalidToken, verify_token  # noqa: E402
+from preboard.qa import QA, Answer, Handoff  # noqa: E402
+from preboard.wiring import build_generator, build_retriever, has_databricks_credentials  # noqa: E402
+from preboard.store import MissLog  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent
 CORPUS_DIR = REPO_ROOT / "data"
@@ -26,10 +28,12 @@ st.set_page_config(page_title="preboard", page_icon="📋")
 
 @st.cache_resource
 def get_qa() -> QA:
+    retriever, confidence_threshold = build_retriever(CORPUS_DIR)
     return QA(
-        retriever=KeywordRetriever(CORPUS_DIR),
-        generator=StubGenerator(),
+        retriever=retriever,
+        generator=build_generator(),
         miss_log=MissLog(DB_PATH),
+        confidence_threshold=confidence_threshold,
     )
 
 
@@ -48,6 +52,8 @@ def resolve_offer_id() -> str | None:
 def main() -> None:
     st.title("preboard")
     st.caption("Ask about your offer. Answers are grounded in your offer packet and cite their source.")
+    if not has_databricks_credentials():
+        st.caption(":gray[Running in local stub mode — no Databricks credentials configured.]")
 
     offer_id = resolve_offer_id()
     if offer_id is None:

@@ -4,7 +4,7 @@ import pytest
 
 from preboard.generation import StubGenerator
 from preboard.qa import QA, Answer, Handoff
-from preboard.retrieval import KeywordRetriever
+from preboard.retrieval import CONFIDENCE_THRESHOLD, KeywordRetriever
 from preboard.store import MissLog
 
 CORPUS_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -17,6 +17,7 @@ def qa(tmp_path):
         retriever=KeywordRetriever(CORPUS_DIR),
         generator=StubGenerator(),
         miss_log=MissLog(tmp_path / "misses.db"),
+        confidence_threshold=CONFIDENCE_THRESHOLD,
     )
 
 

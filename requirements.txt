@@ -1,3 +1,4 @@
 pytest
 streamlit
-# databricks-sdk  # only needed for preboard.generation.DatabricksFMGenerator (PR1d)
+python-dotenv
+databricks-sdk

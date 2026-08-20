@@ -1,5 +1,5 @@
-"""Minimal CLI front end. Databricks App UI is PR1c — deferred out of the critical path
-so the framework decision doesn't block proving the loop.
+"""Minimal CLI front end. Databricks App UI (app.py) is the candidate-facing one;
+this is for local dev/testing and doesn't need the App framework decision.
 
 Auth mirrors what a real link-based front end would do: the candidate supplies a
 token (`--token`), never an offer id directly. `--offer-id` is a dev bypass for local
@@ -11,11 +11,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from preboard.auth import InvalidToken, issue_token, verify_token
-from preboard.generation import StubGenerator
-from preboard.qa import QA, Answer, Handoff
-from preboard.retrieval import KeywordRetriever
-from preboard.store import MissLog
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from preboard.auth import InvalidToken, issue_token, verify_token  # noqa: E402
+from preboard.qa import QA, Answer, Handoff  # noqa: E402
+from preboard.wiring import build_generator, build_retriever, has_databricks_credentials  # noqa: E402
+from preboard.store import MissLog  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -49,13 +52,16 @@ def main() -> None:
     else:
         parser.error("one of --token or --offer-id is required")
 
+    retriever, confidence_threshold = build_retriever(args.corpus_dir)
     qa = QA(
-        retriever=KeywordRetriever(args.corpus_dir),
-        generator=StubGenerator(),
+        retriever=retriever,
+        generator=build_generator(),
         miss_log=MissLog(args.db),
+        confidence_threshold=confidence_threshold,
     )
 
-    print(f"preboard Q&A — offer '{offer_id}'. Ctrl-D to quit.")
+    mode = "real Databricks FM + embeddings" if has_databricks_credentials() else "local stub"
+    print(f"preboard Q&A — offer '{offer_id}' ({mode}). Ctrl-D to quit.")
     while True:
         try:
             question = input("\n> ").strip()

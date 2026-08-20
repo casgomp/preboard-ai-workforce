@@ -79,3 +79,38 @@ candidate and returned a wrong answer instead of a handoff, which undermines inv
 (`MIN_OVERLAP_TOKENS = 2`) alongside the ratio threshold; regression test added. Same
 root cause as before — this scorer has no real notion of confidence — and the same
 fix pattern: patch cheaply, log it, defer the structural fix to PR1d.
+
+## PR1d – real retrieval and generation (2026-08-20)
+
+**Why:** Everything through PR2 ran on stand-ins (keyword overlap, a stub generator).
+Once Databricks credentials were available, this was the last piece needed for the
+pitch's architecture to be real rather than simulated.
+
+**Design:** Discovered the workspace has both chat and embeddings serving endpoints
+available (pay-per-token Foundation Model APIs), which changed the plan — rather than
+standing up a Unity Catalog Vector Search index (a Delta table, a sync pipeline, a
+provisioned endpoint: real setup for a corpus this small), `EmbeddingRetriever` calls
+`databricks-gte-large-en` directly and computes cosine similarity in-process. Chunk
+loading was extracted from `retrieval.py` into `corpus.py` since two retrievers now
+share it. `wiring.py` centralizes the real-vs-stub choice for both `cli.py` and
+`app.py`, based on whether `DATABRICKS_HOST`/`DATABRICKS_TOKEN` are configured — a
+teammate without a workspace still gets a working app, not a crash.
+
+**Gotchas resolved:** two real bugs, neither of which a unit test could have caught
+since `StubGenerator`/`KeywordRetriever` never touch the SDK. (1) `serving_endpoints
+.query(messages=[...])` needs typed `ChatMessage` objects, not raw dicts — fixed in
+`generation.py`. (2) The confidence threshold was assumed to separate cleanly like the
+keyword-overlap one had; empirically it didn't (grounded 0.576-0.757, ungrounded
+0.392-0.602, overlapping in the middle). Picked 0.62 — just above the ungrounded max —
+so the one ambiguous grounded question fails toward a handoff, not a wrong answer.
+Documented as a small-sample calibration, not a settled constant, with
+`tests/test_databricks_integration.py` (opt-in via `RUN_DATABRICKS_INTEGRATION_TESTS=1`,
+since it hits the network and costs tokens) as the executable record. Verified in a
+real browser: a grounded question got a real LLM-paraphrased answer with correct
+citation, and the exact "manager" false positive from PR2 was confirmed fixed under
+real embeddings.
+
+**Deferred, unlocked by this merge:** the corpus itself still lives in local markdown,
+not Unity Catalog (§2) — fine at this scale, revisit if it grows. Gap-report semantic
+clustering (§2) could now use these same embeddings but doesn't yet — unclaimed
+follow-up.

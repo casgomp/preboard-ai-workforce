@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from preboard.retrieval import Chunk
+from preboard.corpus import Chunk
 
 
 class Generator(Protocol):
@@ -37,6 +37,8 @@ class DatabricksFMGenerator:
         self._client = WorkspaceClient()
 
     def generate(self, question: str, chunk: Chunk) -> str:
+        from databricks.sdk.service.serving import ChatMessage, ChatMessageRole  # noqa: PLC0415
+
         prompt = (
             "Answer the candidate's question using ONLY the excerpt below. "
             "If the excerpt doesn't contain the answer, say so plainly.\n\n"
@@ -45,6 +47,6 @@ class DatabricksFMGenerator:
         )
         response = self._client.serving_endpoints.query(
             name=self._endpoint_name,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[ChatMessage(role=ChatMessageRole.USER, content=prompt)],
         )
         return response.choices[0].message.content
