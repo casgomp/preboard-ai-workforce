@@ -11,6 +11,15 @@ An onboarding assistant for people who have **signed a job offer but haven't sta
 
 > All people, companies and data in this repo are fictional demo content.
 
+## Team
+
+Built by a team of four at the 42 Wolfsburg AI Workforce hackathon:
+
+- **Mikhail Kugan**
+- **Pedro Castro**
+- **Sude Gergeroglu**
+- **Emre Kirgin**
+
 ## Screenshots
 
 | Login | Candidate dashboard |
