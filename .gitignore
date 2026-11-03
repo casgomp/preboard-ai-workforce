@@ -4,3 +4,17 @@ __pycache__/
 *.db
 .env
 vars
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node (frontend has its own .gitignore too)
+node_modules/
